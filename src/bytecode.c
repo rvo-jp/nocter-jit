@@ -11,3 +11,9 @@ void concat(bytecode* code1, bytecode* code2) {
     free(code2->mem);
 }
 
+// code1の末尾に追加
+void append(bytecode* code1, uint8_t *mem, size_t size) {
+    code1->mem = realloc(code1->mem, code1->size + size);
+    memcpy(code1->mem + code1->size, mem, size);
+    code1->size += size;
+}
