@@ -2,19 +2,34 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define ID(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') 
 
-typedef struct {
-    enum { STRING } type;
+typedef enum type {
+    STRING
+} type;
+
+typedef struct value {
+    type type;
     uint64_t dat;
 } value;
 
-typedef struct {
+typedef struct state{
     enum { LET, PUTS, EXIT } cmd;
     uint8_t* code;
     size_t size;
 } state;
+
+typedef struct variable {
+    char id[64];
+    type type;
+} variable;
+
+typedef struct variables {
+    variable* mem;
+    size_t size;
+} variables;
 
 
 void skip(char** p) {
@@ -52,7 +67,7 @@ value parse_value(char** p) {
 }
 
 
-state parse_statement(char **p) {
+state parse_statement(char **p, variables* vers) {
     if ((*p)[0] == 'p' && (*p)[1] == 'u' && (*p)[2] == 't' && (*p)[3] == 's' && !ID((*p)[4])) {
         puts("@puts");
         (*p) += 4;
@@ -91,16 +106,43 @@ state parse_statement(char **p) {
         memcpy(res.code, code, res.size);
         return res;
     }
-    // else if ((*p)[0] == 'l' && (*p)[1] == 'e' && (*p)[2] == 't' && !ID((*p)[3])) {
-        
-    // }
+    else if ((*p)[0] == 'l' && (*p)[1] == 'e' && (*p)[2] == 't' && !ID((*p)[3])) {
+        puts("@let");
+        (*p) += 3;
+        skip(p);
+        variable ver;
+
+        // id
+        if (!ID(**p)) {
+            puts("error: state");
+            exit(-1);
+        }
+        char *p2 = ver.id;
+        do *p2 ++ = *(*p)++;
+        while (ID(**p));
+        *p2 ++ = '\0';
+        skip(p);
+
+        // right hand value
+        value val = parse_value(p);
+        ver.type = val.type;
+
+        // resister
+        vers->mem = realloc(vers->mem, vers->size + 1);
+        vers->mem[vers->size ++] = ver;
+
+        uint8_t code[] = {
+            0x48,0xB8,0,0,0,0,0,0,0,0,      // mov rax, dat
+            0x48,0x89,0x45,-(vers->size * 8)// mov [rbp - (n * 8)], rax
+        };
+        *(uint64_t*)(code + 2)  = val.dat;
+    }
     // else if (**p == '{') {
 
     // }
 
     else {
         puts("error: state");
-        puts(*p);
         exit(-1);
     }
 }
@@ -108,7 +150,8 @@ state parse_statement(char **p) {
 
 typedef void (*func_t)();
 
-func_t compile(const char* path) {
+// malloc
+char* readfile(const char* path) {
     FILE* fp = fopen(path, "rb");
     if (!fp) {
         puts("error: file not found");
@@ -124,16 +167,27 @@ func_t compile(const char* path) {
     source[flen] = '\0';
     fclose(fp);
 
+    return source;
+}
+
+func_t compile(const char* path) {
+    char *source = readfile(path);
+
     // compile
     uint8_t shadow_space[] = {0x48,0x83,0xEC,0x28};
     size_t size = sizeof(shadow_space);
     uint8_t *code = malloc(size);
     memcpy(code, shadow_space, size);
 
+    variables vars = {
+        .mem = NULL,
+        .size = 0
+    };
+
     char *p = source;
     skip(&p);
     while (*p != '\0') {
-        state res = parse_statement(&p);
+        state res = parse_statement(&p, &vars);
         code = realloc(code, size + res.size);
         memcpy(code + size, res.code, res.size);
         size += res.size;

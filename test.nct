@@ -3,4 +3,5 @@ puts "abcdef"
 
 puts "lweibf wer"
 
+let abc "aaa"
 exit
