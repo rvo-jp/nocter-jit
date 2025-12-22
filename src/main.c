@@ -248,4 +248,5 @@ func_t compile(const char* path) {
 int main() {
     func_t exe = compile("./test.nct");
     exe();
+    return 0;
 }
