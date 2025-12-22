@@ -35,7 +35,7 @@ void skip(char** p) {
 
 #define ID(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') 
 
-void setid(char **p, char *mem) {
+void setid(char** p, char* mem) {
     do *mem ++ = *(*p)++;
     while (ID(**p));
     *mem = '\0';
@@ -44,9 +44,9 @@ void setid(char **p, char *mem) {
 type parse_value(char** p, bytecode *code, variables* vers) {
     if (ID(**p)) {
         char id[64];
-        setid(p, &id);
+        setid(p, id);
 
-        for (size_t i = vers->size; i; i --) {
+        for (size_t i = vers->size - 1; i >= 0; i --) {
             variable ver = vers->mem[i];
             if (strcmp(ver.id, id) == 0) {
                 uint8_t byte[] = {
@@ -114,25 +114,8 @@ state parse_statement(char **p, bytecode *code, variables* vers) {
 
         return PUTS;
     }
-    // else if ((*p)[0] == 'e' && (*p)[1] == 'x' && (*p)[2] == 'i' && (*p)[3] == 't' && !ID((*p)[4])) {
-    //     puts("@exit");
-    //     (*p) += 4;
-    //     uint8_t code[] = {
-    //         0x31,0xC9,                      // xor ecx, ecx
-    //         0x48,0xB8,0,0,0,0,0,0,0,0,      // mov rax, exit
-    //         0xFF,0xD0                       // call rax
-    //     };
-    //     *(uint64_t*)(code + 4) = (uint64_t)exit;
-
-    //     state res;
-    //     res.cmd = EXIT;
-    //     res.code.size = sizeof(code);
-    //     res.code.mem = malloc(res.code.size);
-    //     memcpy(res.code.mem, code, res.code.size);
-    //     return res;
-    // }
     else if ((*p)[0] == 'l' && (*p)[1] == 'e' && (*p)[2] == 't' && !ID((*p)[3])) {
-        puts("@let");
+        printf("@let %d\n", vers->size);
         (*p) += 3;
         skip(p);
         variable ver;
@@ -142,7 +125,7 @@ state parse_statement(char **p, bytecode *code, variables* vers) {
             puts("error: not id");
             exit(-1);
         }
-        setid(p, &ver.id);
+        setid(p, ver.id);
         skip(p);
 
         // right hand value
@@ -201,8 +184,8 @@ func_t compile(const char* path) {
 
     uint8_t prologue[] = {
         0x55,                   // push rbp
-        0x48,0x89,0xE5,         // mov rbp, rsp
-        0x48,0x83,0xEC,0x28,    // sub rsp, 0x28
+        0x48, 0x89, 0xE5,       // mov rbp, rsp
+        0x48, 0x83, 0xEC, 0x28, // sub rsp, 0x28
     };
     append(&code, prologue, sizeof(prologue));
 
@@ -215,17 +198,12 @@ func_t compile(const char* path) {
     skip(&p);
     while (*p != '\0') {
         parse_statement(&p, &code, &vars);
-
-        // for (int i = 0; i < code.size; i ++) {
-        //     printf("%d ", code.mem[i]);
-        // }
-        // puts("");
         skip(&p);
     }
     free(source);
 
     uint8_t epilogue[] = {
-        0x48,0x83,0xC4,0x28,    // add rsp, 0x28
+        0x48, 0x83, 0xC4, 0x28, // add rsp, 0x28
         0x5D,                   // pop rbp
         0xC3                    // ret
     };
@@ -247,6 +225,7 @@ func_t compile(const char* path) {
 
 int main() {
     func_t exe = compile("./test.nct");
+    puts("@compile done\n");
     exe();
     return 0;
 }

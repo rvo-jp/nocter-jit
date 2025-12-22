@@ -1,3 +1,4 @@
 
-
-let abc "aaaaa"
+let x "XXXX"
+puts "aaa"
+puts x
