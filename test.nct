@@ -1,7 +1,9 @@
 
-puts "abcdef"
+let abc "aaaaa"
+let abc "aaaaa"
+let abc "aaaaa"
+let abc "aaaaa"
+let abc "aaaaa"
+let abc "aaaaa"
 
-puts "lweibf wer"
-
-let abc "aaa"
 exit

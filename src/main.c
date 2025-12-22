@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// 式の評価結果は必ずrax
+
+#include "bytecode.h"
+
 #define ID(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') 
 
 typedef enum type {
@@ -17,8 +21,7 @@ typedef struct value {
 
 typedef struct state{
     enum { LET, PUTS, EXIT } cmd;
-    uint8_t* code;
-    size_t size;
+    bytecode code;
 } state;
 
 typedef struct variable {
@@ -84,9 +87,9 @@ state parse_statement(char **p, variables* vers) {
 
         state res;
         res.cmd = PUTS;
-        res.size = sizeof(code);
-        res.code = malloc(res.size);
-        memcpy(res.code, code, res.size);
+        res.code.size = sizeof(code);
+        res.code.mem = malloc(res.code.size);
+        memcpy(res.code.mem, code, res.code.size);
         return res;
     }
     else if ((*p)[0] == 'e' && (*p)[1] == 'x' && (*p)[2] == 'i' && (*p)[3] == 't' && !ID((*p)[4])) {
@@ -101,9 +104,9 @@ state parse_statement(char **p, variables* vers) {
 
         state res;
         res.cmd = EXIT;
-        res.size = sizeof(code);
-        res.code = malloc(res.size);
-        memcpy(res.code, code, res.size);
+        res.code.size = sizeof(code);
+        res.code.mem = malloc(res.code.size);
+        memcpy(res.code.mem, code, res.code.size);
         return res;
     }
     else if ((*p)[0] == 'l' && (*p)[1] == 'e' && (*p)[2] == 't' && !ID((*p)[3])) {
@@ -114,13 +117,13 @@ state parse_statement(char **p, variables* vers) {
 
         // id
         if (!ID(**p)) {
-            puts("error: state");
+            puts("error: not id");
             exit(-1);
         }
         char *p2 = ver.id;
         do *p2 ++ = *(*p)++;
         while (ID(**p));
-        *p2 ++ = '\0';
+        *p2 = '\0';
         skip(p);
 
         // right hand value
@@ -128,7 +131,7 @@ state parse_statement(char **p, variables* vers) {
         ver.type = val.type;
 
         // resister
-        vers->mem = realloc(vers->mem, vers->size + 1);
+        vers->mem = realloc(vers->mem, (vers->size + 1) * sizeof(variable));
         vers->mem[vers->size ++] = ver;
 
         uint8_t code[] = {
@@ -136,6 +139,13 @@ state parse_statement(char **p, variables* vers) {
             0x48,0x89,0x45,-(vers->size * 8)// mov [rbp - (n * 8)], rax
         };
         *(uint64_t*)(code + 2)  = val.dat;
+
+        state res;
+        res.cmd = LET;
+        res.code.size = sizeof(code);
+        res.code.mem = malloc(res.code.size);
+        memcpy(res.code.mem, code, res.code.size);
+        return res;
     }
     // else if (**p == '{') {
 
@@ -171,38 +181,42 @@ char* readfile(const char* path) {
 }
 
 func_t compile(const char* path) {
-    char *source = readfile(path);
-
     // compile
-    uint8_t shadow_space[] = {0x48,0x83,0xEC,0x28};
-    size_t size = sizeof(shadow_space);
-    uint8_t *code = malloc(size);
-    memcpy(code, shadow_space, size);
+    bytecode code;
+    uint8_t shadow_space1[] = {0x48,0x83,0xEC,0x28};
+    code.size = sizeof(shadow_space1);
+    code.mem = malloc(code.size);
+    memcpy(code.mem, shadow_space1, code.size);
 
     variables vars = {
         .mem = NULL,
         .size = 0
     };
 
+    char *source = readfile(path);
     char *p = source;
     skip(&p);
     while (*p != '\0') {
         state res = parse_statement(&p, &vars);
-        code = realloc(code, size + res.size);
-        memcpy(code + size, res.code, res.size);
-        size += res.size;
-        free(res.code);
+
+        concat(&code, &res.code);
+
+        // for (int i = 0; i < code.size; i ++) {
+        //     printf("%d ", code.mem[i]);
+        // }
+        // puts("");
         skip(&p);
     }
     free(source);
 
     uint8_t* vcode = (uint8_t*)VirtualAlloc(
-        NULL, size,
+        NULL, code.size,
         MEM_COMMIT | MEM_RESERVE,
         PAGE_EXECUTE_READWRITE
     );
-    memcpy(vcode, code, size);
-    free(code);
+    memcpy(vcode, code.mem, code.size);
+    
+    free(code.mem);
     return (func_t)vcode;
 }
 
