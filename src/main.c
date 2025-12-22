@@ -5,6 +5,7 @@
 #include <stdlib.h>
 
 // 式の評価結果は必ずrax
+// 変数は rspベース disp32 2パス固定フレーム
 
 #include "bytecode.h"
 
@@ -26,6 +27,7 @@ typedef struct variable {
 typedef struct variables {
     variable* mem;
     size_t size;
+    size_t max;
 } variables;
 
 
@@ -41,20 +43,22 @@ void setid(char** p, char* mem) {
     *mem = '\0';
 }
 
-type parse_value(char** p, bytecode *code, variables* vers) {
+type parse_value(char** p, bytecode *code, variables* vars) {
     if (ID(**p)) {
         char id[64];
         setid(p, id);
 
-        for (size_t i = vers->size - 1; i >= 0; i --) {
-            variable ver = vers->mem[i];
-            if (strcmp(ver.id, id) == 0) {
+        for (size_t i = vars->size - 1; i >= 0; i --) {
+            variable var = vars->mem[i];
+            if (strcmp(var.id, id) == 0) {
                 uint8_t byte[] = {
-                    // mov rax, [rbp - (i+1)*8]
-                    0x48, 0x8B, 0x45, (uint8_t)(-((i+1) * 8))
+                    // mov rax, [rsp + 0x20 + i*8]
+                    0x48, 0x8B, 0x84, 0x24, 0,0,0,0
                 };
+                *(int32_t*)(byte + 4) = 0x20 + i * 8;
                 append(code, byte, sizeof(byte));
-                return ver.type;
+                printf("@var %d %s\n", i+1, var.id);
+                return var.type;
             }
         }
 
@@ -94,12 +98,12 @@ type parse_value(char** p, bytecode *code, variables* vers) {
 }
 
 
-state parse_statement(char **p, bytecode *code, variables* vers) {
+state parse_statement(char **p, bytecode *code, variables* vars) {
     if ((*p)[0] == 'p' && (*p)[1] == 'u' && (*p)[2] == 't' && (*p)[3] == 's' && !ID((*p)[4])) {
         puts("@puts");
         (*p) += 4;
         skip(p);
-        if (parse_value(p, code, vers) != STRING) {
+        if (parse_value(p, code, vars) != STRING) {
             puts("type-error: STRING");
             exit(-1);
         }
@@ -115,31 +119,37 @@ state parse_statement(char **p, bytecode *code, variables* vers) {
         return PUTS;
     }
     else if ((*p)[0] == 'l' && (*p)[1] == 'e' && (*p)[2] == 't' && !ID((*p)[3])) {
-        printf("@let %d\n", vers->size);
         (*p) += 3;
         skip(p);
-        variable ver;
+        variable var;
 
         // id
         if (!ID(**p)) {
             puts("error: not id");
             exit(-1);
         }
-        setid(p, ver.id);
+        setid(p, var.id);
         skip(p);
 
         // right hand value
-        ver.type = parse_value(p, code, vers);
+        var.type = parse_value(p, code, vars);
 
         // resister
-        vers->mem = realloc(vers->mem, (vers->size + 1) * sizeof(variable));
-        vers->mem[vers->size ++] = ver;
+        int i = vars->size;
+        vars->mem = realloc(vars->mem, (vars->size + 1) * sizeof(variable));
+        vars->mem[vars->size ++] = var;
+
+        // スタックサイズ更新
+        if (vars->max < vars->size) vars->max = vars->size;
 
         uint8_t byte[] = {
-            0x48,0x89,0x45,(uint8_t)(-(vers->size * 8))    // mov [rbp - (i+1)*8], rax
+            // mov [rsp + 0x20 + i*8], rax
+            0x48, 0x89, 0x84, 0x24, 0,0,0,0
         };
+        *(int32_t*)(byte + 4) = 0x20 + i * 8;
         append(code, byte, sizeof(byte));
 
+        printf("@let %d %s\n", vars->size, vars->mem[vars->size - 1]);
         return LET;
     }
     // else if (**p == '{') {
@@ -183,15 +193,14 @@ func_t compile(const char* path) {
     };
 
     uint8_t prologue[] = {
-        0x55,                   // push rbp
-        0x48, 0x89, 0xE5,       // mov rbp, rsp
-        0x48, 0x83, 0xEC, 0x28, // sub rsp, 0x28
+        0x48, 0x81, 0xEC, 0,0,0,0   // sub rsp, stack_size
     };
     append(&code, prologue, sizeof(prologue));
 
     variables vars = {
         .mem = NULL,
-        .size = 0
+        .size = 0,
+        .max = 0
     };
 
     char *source = readfile(path), *p = source;
@@ -203,14 +212,25 @@ func_t compile(const char* path) {
     free(source);
 
     uint8_t epilogue[] = {
-        0x48, 0x83, 0xC4, 0x28, // add rsp, 0x28
-        0x5D,                   // pop rbp
-        0xC3                    // ret
+        0x48, 0x81, 0xC4, 0,0,0,0,  // add rsp, stack_size
+        0xC3                        // ret
     };
     append(&code, epilogue, sizeof(epilogue));
 
 
+    // スタックサイズ計算
+    int stack_size = 0x20 + vars.max * 8;
+    stack_size = (stack_size + 0xF) & ~0xF;   // 16byte 丸め
+    
+    // 埋め込み
+    *(int32_t*)(code.mem + 3) = stack_size;
+    *(int32_t*)(code.mem + code.size - 5) = stack_size;
 
+
+    for (int i = 0; i < code.size; i ++) {
+        printf("%x ", code.mem[i]);
+    }
+    puts("");
 
     uint8_t* vcode = (uint8_t*)VirtualAlloc(
         NULL, code.size,

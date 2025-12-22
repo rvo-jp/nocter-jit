@@ -1,4 +1,9 @@
 
-let x "XXXX"
-puts "aaa"
-puts x
+let a "AAA"
+let b "BBB"
+let c "CCC"
+
+puts a
+puts b
+puts c
+puts "akd"
