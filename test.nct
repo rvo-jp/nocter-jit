@@ -1,9 +1,5 @@
 
 let a "AAA"
 let b "BBB"
-let c "CCC"
-
 puts a
 puts b
-puts c
-puts "akd"

@@ -2,6 +2,7 @@
 #define NOCTER_BYTECODE_H
 
 #include <stdint.h>
+#include <stdlib.h>
 
 typedef struct bytecode {
     uint8_t* mem;
