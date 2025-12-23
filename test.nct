@@ -1,5 +1,10 @@
-
 let a "AAA"
-let b "BBB"
-puts a
+
+{
+    let b "BBB"
+    puts a
+    puts b
+}
+
 puts b
+

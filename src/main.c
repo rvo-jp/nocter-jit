@@ -22,7 +22,8 @@ typedef enum type {
 typedef enum state {
     LET,
     PUTS,
-    EXIT
+    EXIT,
+    BLOCK
 } state;
 
 typedef struct variable {
@@ -47,6 +48,7 @@ void setid(char** p, char* mem) {
     do *mem ++ = *(*p)++;
     while (ID(**p));
     *mem = '\0';
+    skip(p);
 }
 
 type parse_value(char** p, bytecode *code, variables* vars) {
@@ -54,9 +56,13 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         char id[64];
         setid(p, id);
 
-        for (size_t i = vars->size - 1; i >= 0; i --) {
+        printf("@var %zu\n", vars->size);
+
+        for (int i = vars->size - 1; i >= 0; i --) {
             variable var = vars->mem[i];
             if (strcmp(var.id, id) == 0) {
+                printf("%zu %s\n", i+1, var.id);
+
                 #ifdef _WIN32
                 uint8_t byte[] = {
                     0x48, 0x8B, 0x84, 0x24, 0,0,0,0 // mov rax, [rsp + 0x20 + i*8] 
@@ -75,7 +81,6 @@ type parse_value(char** p, bytecode *code, variables* vars) {
                 #endif
 
                 append(code, byte, sizeof(byte));
-                printf("@var %d %s\n", i+1, var.id);
                 return var.type;
             }
         }
@@ -137,6 +142,7 @@ state parse_statement(char **p, bytecode *code, variables* vars) {
         puts("@puts");
         (*p) += 4;
         skip(p);
+
         if (parse_value(p, code, vars) != STRING) {
             puts("type-error: STRING");
             exit(-1);
@@ -181,15 +187,15 @@ state parse_statement(char **p, bytecode *code, variables* vars) {
             exit(-1);
         }
         setid(p, var.id);
-        skip(p);
 
         // right hand value
         var.type = parse_value(p, code, vars);
 
         // resister
         int i = vars->size;
-        vars->mem = realloc(vars->mem, (vars->size + 1) * sizeof(variable));
-        vars->mem[vars->size ++] = var;
+        vars->size ++;
+        vars->mem = realloc(vars->mem, vars->size * sizeof(variable));
+        vars->mem[i] = var;
 
         // スタックサイズ更新
         if (vars->max < vars->size) vars->max = vars->size;
@@ -213,17 +219,24 @@ state parse_statement(char **p, bytecode *code, variables* vars) {
 
         append(code, byte, sizeof(byte));
 
-        printf("@let %d %s\n", vars->size, vars->mem[vars->size - 1]);
+        printf("@let %zu %s\n", vars->size, vars->mem[vars->size - 1].id);
         return LET;
     }
-    // else if (**p == '{') {
-
-    // }
-
-    else {
-        puts("error: state");
-        exit(-1);
+    else if (**p == '{') {
+        size_t size = vars->size;
+        (*p) ++;
+        skip(p);
+        while (**p != '}') parse_statement(p, code, vars);
+        (*p) ++;
+        skip(p);
+        vars->size = size;
+        printf("@} %zu\n", vars->size);
+        return BLOCK;
     }
+
+    puts("error: state");
+    puts(*p);
+    exit(-1);
 }
 
 
@@ -276,10 +289,8 @@ func_t compile(const char* path) {
 
     char *source = readfile(path), *p = source;
     skip(&p);
-    while (*p != '\0') {
-        parse_statement(&p, &code, &vars);
-        skip(&p);
-    }
+    while (*p != '\0') parse_statement(&p, &code, &vars);
+    free(vars.mem);
     free(source);
 
     uint8_t epilogue[] = {
@@ -295,7 +306,7 @@ func_t compile(const char* path) {
     append(&code, epilogue, sizeof(epilogue));
 
     // スタックサイズ計算
-    printf("@vars.max = %d\n", vars.max);
+    printf("@vars.max = %zu\n", vars.max);
     int stack_size = 0x20 + vars.max * 8;
     stack_size = (stack_size + 0xF) & ~0xF;   // 16byte 丸め
     
@@ -349,7 +360,7 @@ func_t compile(const char* path) {
         return NULL;
     }
 
-    __builtin___clear_cache(execode, execode + code.size);
+    __builtin___clear_cache((char *)execode, (char *)(execode + code.size));
     #endif
 
     free(code.mem);
