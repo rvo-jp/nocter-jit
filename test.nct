@@ -3,7 +3,11 @@ let a "AAA"
 {
     let b "BBB"
     puts a
-    puts b
+    {
+        let c "CCC"
+        puts c
+    }
+    puts c
 }
 
 puts b

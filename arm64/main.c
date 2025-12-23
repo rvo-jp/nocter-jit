@@ -2,11 +2,16 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <windows.h>
+
+#ifdef _WIN32
+    #include <windows.h>
+#else
+    #include <sys/mman.h>
+    #include <unistd.h>
+#endif
 
 // 式の評価結果は必ずrax
 // 変数は rspベース disp32 2パス固定フレーム
-// 最終目標は c runtime に一切頼らない構成。OS命令使う
 
 #include "bytecode.h"
 
@@ -58,10 +63,22 @@ type parse_value(char** p, bytecode *code, variables* vars) {
             if (strcmp(var.id, id) == 0) {
                 printf("%zu %s\n", i+1, var.id);
 
+                #ifdef _WIN32
                 uint8_t byte[] = {
                     0x48, 0x8B, 0x84, 0x24, 0,0,0,0 // mov rax, [rsp + 0x20 + i*8] 
                 };
                 *(int32_t*)(byte + 4) = 0x20 + i * 8;
+
+                #else
+                uint8_t byte[] = {
+                    0xE0, 0x03, 0x40, 0xF9   // ldr x0, [sp, #imm12]
+                };
+
+                int offset = 0x20 + i * 8;
+                int imm12  = offset >> 3;
+
+                *(uint32_t*)byte |= ((imm12 & 0xFFF) << 10);
+                #endif
 
                 append(code, byte, sizeof(byte));
                 return var.type;
@@ -85,38 +102,30 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         (*p) ++;
         skip(p);
 
-        uint8_t byte[] = {
-            0x48,0xC7,0xC1,0x33,0x00,0x00,0x00, // mov rcx, 51
-            0x48,0xB8, 0,0,0,0,0,0,0,0,         // mov rax, malloc
-            0xFF,0xD0,                          // call rax
-
-            0x48,0x89,0xC7,　                   // mov rdi, rax
-            0x48,0x8D,0x35, 0,0,0,0,　          // lea rsi, [rip + str]
-            0x48,0xC7,0xC1,0x32,0x00,0x00,0x00, // mov rcx, 50
-            0xF3,0xA4,                          // rep movsb
-            0xC6,0x47,0x32,0x00,                // mov byte ptr [rdi+50], 0
-
-            // ===== string data (50 bytes) =====
-            'A','B','C','D','E','F','G','H',
-            'I','J','K','L','M','N','O','P',
-            'Q','R','S','T','U','V','W','X',
-            'Y','Z','a','b','c','d','e','f',
-            'g','h','i','j','k','l','m','n',
-            'o','p','q','r','s','t','u','v',
-            'w','x'
-        };
-        uint8_t* str = byte + /* string の開始位置 */;
-        uint8_t* lea = byte + /* lea rsi の disp32 */;
-        *(int32_t*)lea = (int32_t)(str - (lea + 4));
-
         char* mem = malloc(size + 1);   // プロセス終了まで保持
         memcpy(mem, str, size);
         mem[size] = '\0';
 
+        #ifdef _WIN32
         uint8_t byte[] = {
             0x48, 0xB8, 0,0,0,0,0,0,0,0   // mov rax, imm64
         };
         *(uint64_t*)(byte + 2) = (uint64_t)mem;
+
+        #else
+        uint8_t byte[] = {
+            0x00, 0x00, 0x80, 0xD2,     // movz x0, #imm16
+            0x00, 0x00, 0xA0, 0xF2,     // movk x0, #imm16, lsl #16
+            0x00, 0x00, 0xC0, 0xF2,     // movk x0, #imm16, lsl #32
+            0x00, 0x00, 0xE0, 0xF2      // movk x0, #imm16, lsl #48
+        };
+        uint64_t addr = (uint64_t)mem;
+        uint32_t* b = (uint32_t*)byte;
+        b[0] |= ((addr & 0xFFFF) << 5);         // movz x0, #imm16
+        b[1] |= (((addr >> 16) & 0xFFFF) << 5); // movk x0, #imm16, lsl #16
+        b[2] |= (((addr >> 32) & 0xFFFF) << 5); // movk x0, #imm16, lsl #32
+        b[3] |= (((addr >> 48) & 0xFFFF) << 5); // movk x0, #imm16, lsl #48
+        #endif
 
         append(code, byte, sizeof(byte));
         return STRING;
@@ -139,12 +148,29 @@ state parse_statement(char **p, bytecode *code, variables* vars) {
             exit(-1);
         }
 
+        #ifdef _WIN32
         uint8_t byte[] = {
             0x48,0x89,0xC1,                 // mov rcx, rax
             0x48,0xB8,0,0,0,0,0,0,0,0,      // mov rax, imm64
             0xFF,0xD0,                      // call rax
         };
         *(uint64_t*)(byte + 5) = (uint64_t)puts;
+
+        #else
+        uint8_t byte[] = {
+            0x10, 0x00, 0x80, 0xD2,         // movz x16, #imm16
+            0x10, 0x00, 0xA0, 0xF2,         // movk x16, #imm16, lsl #16
+            0x10, 0x00, 0xC0, 0xF2,         // movk x16, #imm16, lsl #32
+            0x10, 0x00, 0xE0, 0xF2,         // movk x16, #imm16, lsl #48
+            0x00, 0x02, 0x3F, 0xD6          // blr x16
+        };
+        uint64_t addr = (uint64_t)puts;
+        uint32_t* b = (uint32_t*)byte;
+        b[0] |= ((addr & 0xFFFF) << 5); // movz
+        b[1] |= (((addr >> 16) & 0xFFFF) << 5); // movk lsl 16
+        b[2] |= (((addr >> 32) & 0xFFFF) << 5); // movk lsl 32
+        b[3] |= (((addr >> 48) & 0xFFFF) << 5); // movk lsl 48
+        #endif
 
         append(code, byte, sizeof(byte));
 
@@ -171,13 +197,25 @@ state parse_statement(char **p, bytecode *code, variables* vars) {
         vars->mem = realloc(vars->mem, vars->size * sizeof(variable));
         vars->mem[i] = var;
 
-        // 変数の最大数を更新
+        // スタックサイズ更新
         if (vars->max < vars->size) vars->max = vars->size;
 
+        #ifdef _WIN32
         uint8_t byte[] = {
             0x48, 0x89, 0x84, 0x24, 0,0,0,0 // mov [rsp + 0x20 + i*8], rax
         };
         *(int32_t*)(byte + 4) = 0x20 + i * 8;
+        
+        #else
+        uint8_t byte[] = {
+            0xE0, 0x03, 0x00, 0xF9   // str x0, [sp, #imm12]
+        };
+
+        int offset = 0x20 + i * 8;      // byte単位
+        int imm12  = offset >> 3;       // ARM64 は 8byte単位
+
+        *(uint32_t*)byte |= ((imm12 & 0xFFF) << 10);
+        #endif
 
         append(code, byte, sizeof(byte));
 
@@ -233,13 +271,20 @@ func_t compile(const char* path) {
     };
 
     uint8_t prologue[] = {
+        #ifdef _WIN32
         0x48, 0x81, 0xEC, 0,0,0,0   // sub rsp, stack_size
+        #else
+        0xFD, 0x7B, 0xBF, 0xA9,     // stp x29, x30, [sp, #-16]!
+        0xFD, 0x03, 0x00, 0x91,     // mov x29, sp
+        0xFF, 0x03, 0x00, 0xD1      // sub sp, sp, #imm12(stack_size)
+        #endif
     };
     append(&code, prologue, sizeof(prologue));
 
     variables vars = {
         .mem = NULL,
-        .size = 0
+        .size = 0,
+        .max = 0
     };
 
     char *source = readfile(path), *p = source;
@@ -249,26 +294,40 @@ func_t compile(const char* path) {
     free(source);
 
     uint8_t epilogue[] = {
+        #ifdef _WIN32
         0x48, 0x81, 0xC4, 0,0,0,0,  // add rsp, stack_size
         0xC3                        // ret
+        #else
+        0xFF, 0x03, 0x00, 0x91,     // add sp, sp, #imm12
+        0xFD, 0x7B, 0xC1, 0xA8,     // ldp x29, x30, [sp], #16
+        0xC0, 0x03, 0x5F, 0xD6      // ret
+        #endif
     };
     append(&code, epilogue, sizeof(epilogue));
 
-    // 変数の最大数を表示
+    // スタックサイズ計算
     printf("@vars.max = %zu\n", vars.max);
-
-    // スタックサイズ
     int stack_size = 0x20 + vars.max * 8;
     stack_size = (stack_size + 0xF) & ~0xF;   // 16byte 丸め
     
     // 埋め込み
+    #ifdef _WIN32
     *(int32_t*)(code.mem + 3) = stack_size;
     *(int32_t*)(code.mem + code.size - 5) = stack_size;
+
+    #else
+    uint32_t* sub = (uint32_t*)(code.mem + 8);
+    *sub |= ((stack_size & 0xFFF) << 10);
+
+    uint32_t* add = (uint32_t*)(code.mem + code.size - 12);
+    *add |= ((stack_size & 0xFFF) << 10);
+    #endif
 
     for (int i = 0; i < code.size; i ++) printf("0x%x, ", code.mem[i]);
     puts("");
 
     // 実行可能メモリに移動
+    #ifdef _WIN32
     uint8_t* execode = (uint8_t*)VirtualAlloc(
         NULL, code.size,
         MEM_COMMIT | MEM_RESERVE,
@@ -278,16 +337,39 @@ func_t compile(const char* path) {
 
     memcpy(execode, code.mem, code.size);
 
+    #else
+    // ページサイズ取得
+    size_t pagesize = sysconf(_SC_PAGESIZE);
+    size_t alloc_size = (code.size + pagesize - 1) & ~(pagesize - 1);
+
+    // まず RW で確保
+    uint8_t* execode = mmap(
+        NULL,
+        alloc_size,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANON,
+        -1, 0
+    );
+    if (execode == MAP_FAILED) return NULL;
+
+    memcpy(execode, code.mem, code.size);
+
+    // RX に変更（W^X）
+    if (mprotect(execode, alloc_size, PROT_READ | PROT_EXEC) != 0) {
+        munmap(execode, alloc_size);
+        return NULL;
+    }
+
+    __builtin___clear_cache((char *)execode, (char *)(execode + code.size));
+    #endif
+
     free(code.mem);
     return (func_t)execode;
 }
 
 int main() {
-    puts("@version 1.0.0");
-
     func_t exe = compile("./test.nct");
     puts("@compile done\n");
-
     exe();
     return 0;
 }
