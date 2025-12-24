@@ -32,6 +32,21 @@ typedef struct variables {
     size_t max;
 } variables;
 
+// void* gc_alloc(size_t size, ObjType type) {
+//     Obj* obj = malloc(size);
+//     obj->type = type;
+//     obj->marked = 0;
+//     obj->next = gc.objects;
+//     gc.objects = obj;
+
+//     gc.bytes_allocated += size;
+
+//     if (gc.bytes_allocated > gc.next_gc) {
+//         gc_collect();
+//     }
+
+//     return obj;
+// }
 
 void skip(char** p) {
     while (**p == ' ' || **p == '\r' || **p == '\n') (*p) ++; 
@@ -85,40 +100,38 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         (*p) ++;
         skip(p);
 
-        uint8_t byte[] = {
-            0x48,0xC7,0xC1,0x33,0x00,0x00,0x00, // mov rcx, 51
-            0x48,0xB8, 0,0,0,0,0,0,0,0,         // mov rax, malloc
-            0xFF,0xD0,                          // call rax
+        
 
-            0x48,0x89,0xC7,　                   // mov rdi, rax
-            0x48,0x8D,0x35, 0,0,0,0,　          // lea rsi, [rip + str]
-            0x48,0xC7,0xC1,0x32,0x00,0x00,0x00, // mov rcx, 50
-            0xF3,0xA4,                          // rep movsb
-            0xC6,0x47,0x32,0x00,                // mov byte ptr [rdi+50], 0
+        uint8_t byte[38 + size + 1] = {
+            0x48,0xC7,0xC1, 0,0,0,0,        // mov rcx, size+1
+            0x48,0xB8, 0,0,0,0,0,0,0,0,     // mov rax, malloc
+            0xFF,0xD0,                      // call rax
 
-            // ===== string data (50 bytes) =====
-            'A','B','C','D','E','F','G','H',
-            'I','J','K','L','M','N','O','P',
-            'Q','R','S','T','U','V','W','X',
-            'Y','Z','a','b','c','d','e','f',
-            'g','h','i','j','k','l','m','n',
-            'o','p','q','r','s','t','u','v',
-            'w','x'
+            0x48,0x89,0xC7,                 // mov rdi, rax
+            0x48,0x8D,0x35, 0,0,0,0,        // lea rsi, [rip + str]
+            0x48,0xC7,0xC1, 0,0,0,0,        // mov rcx, size+1
+            0xF3,0xA4                       // rep movsb
         };
-        uint8_t* str = byte + /* string の開始位置 */;
-        uint8_t* lea = byte + /* lea rsi の disp32 */;
-        *(int32_t*)lea = (int32_t)(str - (lea + 4));
 
-        char* mem = malloc(size + 1);   // プロセス終了まで保持
-        memcpy(mem, str, size);
-        mem[size] = '\0';
+        for (int i = 0; i < size; i ++) {
+            *(byte + 38 + i) = *(str + i);
+        }
+        *(byte + 38 + size) = '\0';
 
-        uint8_t byte[] = {
-            0x48, 0xB8, 0,0,0,0,0,0,0,0   // mov rax, imm64
-        };
-        *(uint64_t*)(byte + 2) = (uint64_t)mem;
+        *(uint64_t*)(byte + 9) = (uint64_t)malloc;
+        *(uint32_t*)(byte + 3) = (uint32_t)(size + 1);
+        *(uint32_t*)(byte + 32) = (uint32_t)(size + 1);
+
+        uint8_t* start_str = byte + 38 + code->size;
+        uint8_t* lea = byte + 25 + code->size;
+        *(int32_t*)(byte + 25) = (int32_t)(start_str - (lea + 4));
 
         append(code, byte, sizeof(byte));
+
+
+        // gc.objects = こいつ(rax)
+        // [ type | marked | next(gc.objects) | len | 'A' 'A' 'A' '\0' ]
+
         return STRING;
     }
     else {
