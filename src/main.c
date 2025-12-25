@@ -54,10 +54,11 @@ void skip(char** p) {
 }
 
 #define ID(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') 
+#define NUM(c) (c >= '0' && c <= '9')
 
 void setid(char** p, char* mem) {
     do *mem ++ = *(*p)++;
-    while (ID(**p));
+    while (ID(**p) || NUM(**p));
     *mem = '\0';
     skip(p);
 }
@@ -125,6 +126,7 @@ type parse_value(char** p, bytecode *code, variables* vars) {
 
         return STRING;
     }
+
     else {
         puts("error: invalid value");
         exit(-1);
