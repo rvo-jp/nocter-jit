@@ -15,6 +15,7 @@ typedef enum type {
 } type;
 
 typedef enum state {
+    EXPR,
     LET,
     PUTS,
     EXIT,
@@ -74,9 +75,9 @@ type parse_value(char** p, bytecode *code, variables* vars) {
                 printf("%zu %s\n", i+1, var.id);
 
                 uint8_t byte[] = {
-                    0x48, 0x8B, 0x84, 0x24, 0,0,0,0 // mov rax, [rsp + 0x20 + i*8] 
+                    0x48, 0x8B, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
                 };
-                *(int32_t*)(byte + 4) = 0x20 + i * 8;
+                *(int32_t*)(byte + 3) = -((i+1) * 8);
 
                 append(code, byte, sizeof(byte));
                 return var.type;
@@ -100,9 +101,9 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         (*p) ++;
         skip(p);
 
+        dbstring(code, str, size);
         
-
-        uint8_t byte[38 + size + 1] = {
+        uint8_t byte[] = {
             0x48,0xC7,0xC1, 0,0,0,0,        // mov rcx, size+1
             0x48,0xB8, 0,0,0,0,0,0,0,0,     // mov rax, malloc
             0xFF,0xD0,                      // call rax
@@ -112,22 +113,12 @@ type parse_value(char** p, bytecode *code, variables* vars) {
             0x48,0xC7,0xC1, 0,0,0,0,        // mov rcx, size+1
             0xF3,0xA4                       // rep movsb
         };
-
-        for (int i = 0; i < size; i ++) {
-            *(byte + 38 + i) = *(str + i);
-        }
-        *(byte + 38 + size) = '\0';
-
         *(uint64_t*)(byte + 9) = (uint64_t)malloc;
         *(uint32_t*)(byte + 3) = (uint32_t)(size + 1);
         *(uint32_t*)(byte + 32) = (uint32_t)(size + 1);
-
-        uint8_t* start_str = byte + 38 + code->size;
-        uint8_t* lea = byte + 25 + code->size;
-        *(int32_t*)(byte + 25) = (int32_t)(start_str - (lea + 4));
+        *(int32_t*)(byte + 25) = (int32_t)(-(code->dbsize + code->size + 29));
 
         append(code, byte, sizeof(byte));
-
 
         // gc.objects = こいつ(rax)
         // [ type | marked | next(gc.objects) | len | 'A' 'A' 'A' '\0' ]
@@ -188,9 +179,9 @@ state parse_statement(char **p, bytecode *code, variables* vars) {
         if (vars->max < vars->size) vars->max = vars->size;
 
         uint8_t byte[] = {
-            0x48, 0x89, 0x84, 0x24, 0,0,0,0 // mov [rsp + 0x20 + i*8], rax
+            0x48, 0x89, 0x85, 0,0,0,0   // mov [rbp - disp32], rax
         };
-        *(int32_t*)(byte + 4) = 0x20 + i * 8;
+        *(int32_t*)(byte + 3) = -(8 * (i + 1));
 
         append(code, byte, sizeof(byte));
 
@@ -207,6 +198,11 @@ state parse_statement(char **p, bytecode *code, variables* vars) {
         vars->size = size;
         printf("@} %zu\n", vars->size);
         return BLOCK;
+    }
+    else {
+        parse_value(p, code, vars);
+        skip(p);
+        return EXPR;
     }
 
     puts("error: state");
@@ -242,18 +238,25 @@ func_t compile(const char* path) {
     // compile
     bytecode code = {
         .mem = NULL,
-        .size = 0
+        .size = 0,
+        .dbmem = NULL,
+        .dbsize = 0
     };
-
-    uint8_t prologue[] = {
-        0x48, 0x81, 0xEC, 0,0,0,0   // sub rsp, stack_size
-    };
-    append(&code, prologue, sizeof(prologue));
 
     variables vars = {
         .mem = NULL,
-        .size = 0
+        .size = 0,
+        .max = 0
     };
+
+
+    uint8_t prologue[] = {
+        0x55,                       // push rbp
+        0x48, 0x89, 0xE5,           // mov rbp, rsp
+        0x48, 0x81, 0xEC, 0,0,0,0   // sub rsp, imm32(frame_size)
+    };
+    append(&code, prologue, sizeof(prologue));
+
 
     char *source = readfile(path), *p = source;
     skip(&p);
@@ -262,36 +265,45 @@ func_t compile(const char* path) {
     free(source);
 
     uint8_t epilogue[] = {
-        0x48, 0x81, 0xC4, 0,0,0,0,  // add rsp, stack_size
-        0xC3                        // ret
+        0x48, 0x89, 0xEC,   // mov rsp, rbp
+        0x5D,               // pop rbp
+        0xC3                // ret
     };
     append(&code, epilogue, sizeof(epilogue));
 
     // 変数の最大数を表示
     printf("@vars.max = %zu\n", vars.max);
 
-    // スタックサイズ
-    int stack_size = 0x20 + vars.max * 8;
-    stack_size = (stack_size + 0xF) & ~0xF;   // 16byte 丸め
-    
-    // 埋め込み
-    *(int32_t*)(code.mem + 3) = stack_size;
-    *(int32_t*)(code.mem + code.size - 5) = stack_size;
+    // フレームサイズ
+    int frame_size = 32 + vars.max * 8;
+    frame_size = (frame_size + 15) & ~15;  // 16バイト境界に丸める
+    *(int32_t*)(code.mem + 7) = frame_size; // 埋め込み
 
-    for (int i = 0; i < code.size; i ++) printf("0x%x, ", code.mem[i]);
-    puts("");
+    // db埋め込み
+    uint8_t jmp[] = {
+        0xE9, 0,0,0,0,     // jmp +N
+    };
+    *(int32_t*)(jmp + 1) = code.dbsize;
+    dbappend(&code, jmp, sizeof(jmp));
 
-    // 実行可能メモリに移動
+
+
+    // 実行可能メモリを作成
     uint8_t* execode = (uint8_t*)VirtualAlloc(
-        NULL, code.size,
+        NULL, code.size + code.dbsize,
         MEM_COMMIT | MEM_RESERVE,
         PAGE_EXECUTE_READWRITE
     );
     if (!execode) return NULL;
 
-    memcpy(execode, code.mem, code.size);
-
+    memcpy(execode, code.dbmem, code.dbsize);
+    memcpy(execode + code.dbsize, code.mem, code.size);
+    free(code.dbmem);
     free(code.mem);
+
+    for (int i = 0; i < code.size + code.dbsize; i ++) printf("%x ", execode[i]);
+    puts("");
+
     return (func_t)execode;
 }
 

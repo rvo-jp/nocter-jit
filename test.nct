@@ -1,14 +1,4 @@
+
 let a "AAA"
-
-{
-    let b "BBB"
-    puts a
-    {
-        let c "CCC"
-        puts c
-    }
-    puts c
-}
-
-puts b
+puts a
 
