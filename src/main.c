@@ -4,14 +4,17 @@
 #include <stdlib.h>
 #include <windows.h>
 
-// 式の評価結果は必ずrax
+// rax = 式の評価結果: 演算用のレジスタ（アキュムレータ）
+// rdx = 一時退避: データの一時記憶用（データレジスタ）
+
 // 変数は rspベース disp32 2パス固定フレーム
 // 最終目標は c runtime に一切頼らない構成。OS命令使う
 
 #include "bytecode.h"
 
 typedef enum type {
-    STRING
+    STRING,
+    INT
 } type;
 
 typedef enum state {
@@ -126,13 +129,57 @@ type parse_value(char** p, bytecode *code, variables* vars) {
 
         return STRING;
     }
+    else if (NUM(**p)) {
+        int64_t n = 0;
+        do n += (*(*p) ++) - '0';
+        while (NUM(**p));
+        skip(p);
 
+        uint8_t byte[] = {
+            0x48, 0x8B, 0,0,0,0,0,0,0,0   // mov rax, n
+        };
+        *(int64_t*)(byte + 3) = n;
+        append(code, byte, sizeof(byte));
+
+        return INT;
+    }
     else {
         puts("error: invalid value");
         exit(-1);
     }
 }
 
+type parse_expr(char** p, bytecode *code, variables* vars) {
+    type res = parse_value(p, code, vars);
+
+    for (;;)
+    if (**p == '+' && **p != '+') {
+        if (res != INT) {
+            puts("typeerror: INT");
+            exit(-1);
+        }
+
+        (*p) ++;
+        skip(p);
+
+        uint8_t byte[] = {
+            0x48,0x89,0xC3 // mov rbx, rax
+        };
+        append(code, byte, sizeof(byte));
+
+        type left = parse_value(p, code, vars);
+        if (left != INT) {
+            puts("typeerror: INT");
+            exit(-1);
+        }
+
+        uint8_t byte[] = {
+            0x48,0x01,0xD8 // add rax, rbx
+        };
+        append(code, byte, sizeof(byte));
+    }
+    else return res;
+}
 
 state parse_statement(char **p, bytecode *code, variables* vars) {
     if ((*p)[0] == 'p' && (*p)[1] == 'u' && (*p)[2] == 't' && (*p)[3] == 's' && !ID((*p)[4])) {
