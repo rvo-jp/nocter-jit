@@ -2,7 +2,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <windows.h>
 
 // rax = 式の評価結果: 演算用のレジスタ（アキュムレータ）
 // rdx = 一時退避: データの一時記憶用（データレジスタ）
@@ -67,25 +66,7 @@ void setid(char** p, char* mem) {
 }
 
 type parse_value(char** p, bytecode *code, variables* vars) {
-    if ((*p)[0] == 't' && (*p)[1] == 'r' && (*p)[2] == 'u' && (*p)[3] == 'e' && !ID((*p)[4])) {
-        (*p) += 4;
-        skip(p);
-
-        uint8_t byte[] = {
-            0x48, 0x83, 0xC8, 0xFF   // or rax, -1
-        };
-        append(code, byte, sizeof(byte));
-    }
-    else if ((*p)[0] == 'f' && (*p)[1] == 'a' && (*p)[2] == 'l' && (*p)[3] == 's' && (*p)[4] == 'e' && !ID((*p)[5])) {
-        (*p) += 5;
-        skip(p);
-
-        uint8_t byte[] = {
-            0x48, 0x31, 0xC0   // xor rax, rax
-        };
-        append(code, byte, sizeof(byte));
-    }
-    else if (ID(**p)) {
+    if (ID(**p)) {
         char id[64];
         setid(p, id);
 
@@ -125,25 +106,20 @@ type parse_value(char** p, bytecode *code, variables* vars) {
 
         dbstring(code, str, size);
         
-        // uint8_t byte[] = {
-        //     0x48,0xC7,0xC1, 0,0,0,0,        // mov rcx, size+1
-        //     0x48,0xB8, 0,0,0,0,0,0,0,0,     // mov rax, malloc
-        //     0xFF,0xD0,                      // call rax
-
-        //     0x48,0x89,0xC7,                 // mov rdi, rax
-        //     0x48,0x8D,0x35, 0,0,0,0,        // lea rsi, [rip + str]
-        //     0x48,0xC7,0xC1, 0,0,0,0,        // mov rcx, size+1
-        //     0xF3,0xA4                       // rep movsb
-        // };
-        // *(uint64_t*)(byte + 9) = (uint64_t)malloc;
-        // *(uint32_t*)(byte + 3) = (uint32_t)(size + 1);
-        // *(uint32_t*)(byte + 32) = (uint32_t)(size + 1);
-        // *(int32_t*)(byte + 25) = (int32_t)(-(code->dbsize + code->size + 29));
-
         uint8_t byte[] = {
-            0x48,0x8D,0x05, 0,0,0,0     // lea rax, [rip + disp32]
+            0x48,0xC7,0xC1, 0,0,0,0,        // mov rcx, size+1
+            0x48,0xB8, 0,0,0,0,0,0,0,0,     // mov rax, malloc
+            0xFF,0xD0,                      // call rax
+
+            0x48,0x89,0xC7,                 // mov rdi, rax
+            0x48,0x8D,0x35, 0,0,0,0,        // lea rsi, [rip + str]
+            0x48,0xC7,0xC1, 0,0,0,0,        // mov rcx, size+1
+            0xF3,0xA4                       // rep movsb
         };
-        *(int32_t*)(byte + 3) = (int32_t)(-(code->dbsize + code->size + 7));
+        *(uint64_t*)(byte + 9) = (uint64_t)malloc;
+        *(uint32_t*)(byte + 3) = (uint32_t)(size + 1);
+        *(uint32_t*)(byte + 32) = (uint32_t)(size + 1);
+        *(int32_t*)(byte + 25) = (int32_t)(-(code->dbsize + code->size + 29));
 
         append(code, byte, sizeof(byte));
 
@@ -170,38 +146,6 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         puts("error: invalid value");
         exit(-1);
     }
-}
-
-type parse_expr(char** p, bytecode *code, variables* vars) {
-    type res = parse_value(p, code, vars);
-
-    for (;;)
-    if (**p == '+' && **p != '+') {
-        if (res != INT) {
-            puts("typeerror: INT");
-            exit(-1);
-        }
-
-        (*p) ++;
-        skip(p);
-
-        uint8_t byte[] = {
-            0x48,0x89,0xC3 // mov rbx, rax
-        };
-        append(code, byte, sizeof(byte));
-
-        type left = parse_value(p, code, vars);
-        if (left != INT) {
-            puts("typeerror: INT");
-            exit(-1);
-        }
-
-        uint8_t byte[] = {
-            0x48,0x01,0xD8 // add rax, rbx
-        };
-        append(code, byte, sizeof(byte));
-    }
-    else return res;
 }
 
 state parse_statement(char **p, bytecode *code, variables* vars) {
