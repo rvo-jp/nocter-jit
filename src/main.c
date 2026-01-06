@@ -9,12 +9,20 @@
 
 // 変数は rspベース disp32 2パス固定フレーム
 // 最終目標は c runtime に一切頼らない構成。OS命令使う
-
+/**
+ * GCシステム
+ * 1. プログラム開始時にヒープ領域を確保
+ * 2. 新しいオブジェクトはヒープ末尾に積む
+ * 3. 追加できなくなったら GC を実行
+ * 4. GC は「使われているオブジェクト」をマークする
+ * 5. マークされなかった領域は空きとして扱う
+ * 6. 新しい割り当ては空き or 末尾に行う
+ */
 #include "bytecode.h"
 
 typedef enum type {
     STRING,
-    INT
+    INTEGER
 } type;
 
 typedef enum state {
@@ -164,7 +172,7 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         *(int64_t*)(byte + 3) = n;
         append(code, byte, sizeof(byte));
 
-        return INT;
+        return INTEGER;
     }
     else {
         puts("error: invalid value");
@@ -172,37 +180,37 @@ type parse_value(char** p, bytecode *code, variables* vars) {
     }
 }
 
-type parse_expr(char** p, bytecode *code, variables* vars) {
-    type res = parse_value(p, code, vars);
+// type parse_expr(char** p, bytecode *code, variables* vars) {
+//     type res = parse_value(p, code, vars);
 
-    for (;;)
-    if (**p == '+' && **p != '+') {
-        if (res != INT) {
-            puts("typeerror: INT");
-            exit(-1);
-        }
+//     for (;;)
+//     if (**p == '+' && **p != '+') {
+//         if (res != INTEGER) {
+//             puts("typeerror: INT");
+//             exit(-1);
+//         }
 
-        (*p) ++;
-        skip(p);
+//         (*p) ++;
+//         skip(p);
 
-        uint8_t byte[] = {
-            0x48,0x89,0xC3 // mov rbx, rax
-        };
-        append(code, byte, sizeof(byte));
+//         uint8_t byte[] = {
+//             0x48,0x89,0xC3 // mov rbx, rax
+//         };
+//         append(code, byte, sizeof(byte));
 
-        type left = parse_value(p, code, vars);
-        if (left != INT) {
-            puts("typeerror: INT");
-            exit(-1);
-        }
+//         type left = parse_value(p, code, vars);
+//         if (left != INTEGER) {
+//             puts("typeerror: INT");
+//             exit(-1);
+//         }
 
-        uint8_t byte[] = {
-            0x48,0x01,0xD8 // add rax, rbx
-        };
-        append(code, byte, sizeof(byte));
-    }
-    else return res;
-}
+//         uint8_t byte[] = {
+//             0x48,0x01,0xD8 // add rax, rbx
+//         };
+//         append(code, byte, sizeof(byte));
+//     }
+//     else return res;
+// }
 
 state parse_statement(char **p, bytecode *code, variables* vars) {
     if ((*p)[0] == 'p' && (*p)[1] == 'u' && (*p)[2] == 't' && (*p)[3] == 's' && !ID((*p)[4])) {

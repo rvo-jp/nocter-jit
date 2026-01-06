@@ -1,26 +1,7 @@
-let a = 1
-let b = 2
 
-
-let f = func(c, d) {
-    let e = a + b
-    return e
-}
-
-f(3, 4)
-
-
-let a = 0
-let c
-{
-    let b = 5
-    c = closure(p) {
-        let d = a + p
-        let e = d + b
-        return d + e
-    }
-}
-
-a = 1
-
-c(2)
+let a "AAA"
+puts a
+puts "bbb"
+let x "XXX"
+puts a
+puts x
