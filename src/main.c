@@ -20,18 +20,17 @@
  */
 #include "bytecode.h"
 
+typedef enum cmd {
+    MOV,
+    ADD
+} cmd;
+
 typedef enum type {
+    ANY,
     STRING,
     INTEGER
 } type;
 
-typedef enum state {
-    EXPR,
-    LET,
-    PUTS,
-    EXIT,
-    BLOCK
-} state;
 
 typedef struct variable {
     char id[64];
@@ -74,7 +73,17 @@ void setid(char** p, char* mem) {
     skip(p);
 }
 
-type parse_value(char** p, bytecode *code, variables* vars) {
+
+// void assign(char** p) {
+//     if ((*p)[0] == '+' && (*p)[1] == '=') {
+//         (*p) += 2;
+//         skip(p);
+
+        
+//     }
+// }
+
+type parse_value(char** p, bytecode *code, variables* vars, cmd op, type ty) {
     if ((*p)[0] == 't' && (*p)[1] == 'r' && (*p)[2] == 'u' && (*p)[3] == 'e' && !ID((*p)[4])) {
         (*p) += 4;
         skip(p);
@@ -102,11 +111,19 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         for (int i = vars->size - 1; i >= 0; i --) {
             variable var = vars->mem[i];
             if (strcmp(var.id, id) == 0) {
-                printf("%zu %s\n", i+1, var.id);
+                if (ty != ANY && var.type != ty) {
+                    puts("type-error");
+                    exit(-1);
+                }
+                // printf("%zu %s\n", i+1, var.id);
 
                 uint8_t byte[] = {
-                    0x48, 0x8B, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
+                    0x48, 0, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
                 };
+                switch (op) {
+                    case MOV: byte[1] = 0x8B; break;
+                    case ADD: byte[1] = 0x03; break;
+                }
                 *(int32_t*)(byte + 3) = -((i+1) * 8);
 
                 append(code, byte, sizeof(byte));
@@ -118,6 +135,11 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         exit(-1);
     }
     else if (**p == '"' || **p == '\'') {
+        if (ty != ANY && ty != STRING) {
+            puts("type-error");
+            exit(-1);
+        }
+
         char* str = *p;
         do {
             if (**p == '\'') (*p) ++;
@@ -161,15 +183,22 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         return STRING;
     }
     else if (NUM(**p)) {
+        if (ty != ANY && ty != INTEGER) {
+            puts("type-error");
+            exit(-1);
+        }
+
         int64_t n = 0;
-        do n += (*(*p) ++) - '0';
+        do n = n * 10 + (*(*p) ++) - '0';
         while (NUM(**p));
         skip(p);
 
         uint8_t byte[] = {
-            0x48, 0x8B, 0,0,0,0,0,0,0,0   // mov rax, n
+            0x48, 0xB8, 0,0,0,0,0,0,0,0   // mov rax, imm64
         };
-        *(int64_t*)(byte + 3) = n;
+        *(int64_t*)(byte + 2) = n;
+        
+        // printf("@n: %ld\n", n);
         append(code, byte, sizeof(byte));
 
         return INTEGER;
@@ -180,48 +209,30 @@ type parse_value(char** p, bytecode *code, variables* vars) {
     }
 }
 
-// type parse_expr(char** p, bytecode *code, variables* vars) {
-//     type res = parse_value(p, code, vars);
+type parse_expr(char** p, bytecode *code, variables* vars, cmd op, type ty) {
+    type res = parse_value(p, code, vars, op, ty);
 
-//     for (;;)
-//     if (**p == '+' && **p != '+') {
-//         if (res != INTEGER) {
-//             puts("typeerror: INT");
-//             exit(-1);
-//         }
+    for (;;)
+    if (**p == '+') {
+        (*p) ++;
+        skip(p);
+        res = parse_value(p, code, vars, ADD, res);
+    }
+    else return res;
+}
 
-//         (*p) ++;
-//         skip(p);
 
-//         uint8_t byte[] = {
-//             0x48,0x89,0xC3 // mov rbx, rax
-//         };
-//         append(code, byte, sizeof(byte));
+void iputs(int64_t n) {
+    printf("%ld\n", n);
+}
 
-//         type left = parse_value(p, code, vars);
-//         if (left != INTEGER) {
-//             puts("typeerror: INT");
-//             exit(-1);
-//         }
-
-//         uint8_t byte[] = {
-//             0x48,0x01,0xD8 // add rax, rbx
-//         };
-//         append(code, byte, sizeof(byte));
-//     }
-//     else return res;
-// }
-
-state parse_statement(char **p, bytecode *code, variables* vars) {
+void parse_statement(char **p, bytecode *code, variables* vars) {
     if ((*p)[0] == 'p' && (*p)[1] == 'u' && (*p)[2] == 't' && (*p)[3] == 's' && !ID((*p)[4])) {
         puts("@puts");
         (*p) += 4;
         skip(p);
 
-        if (parse_value(p, code, vars) != STRING) {
-            puts("type-error: STRING");
-            exit(-1);
-        }
+        parse_expr(p, code, vars, MOV, STRING);
 
         uint8_t byte[] = {
             0x48,0x89,0xC1,                 // mov rcx, rax
@@ -231,8 +242,21 @@ state parse_statement(char **p, bytecode *code, variables* vars) {
         *(uint64_t*)(byte + 5) = (uint64_t)puts;
 
         append(code, byte, sizeof(byte));
+    }
+    else if ((*p)[0] == 'i' &&  (*p)[1] == 'p' && (*p)[2] == 'u' && (*p)[3] == 't' && (*p)[4] == 's' && !ID((*p)[5])) {
+        (*p) += 5;
+        skip(p);
 
-        return PUTS;
+        parse_expr(p, code, vars, MOV, INTEGER);
+
+        uint8_t byte[] = {
+            0x48,0x89,0xC1,                 // mov rcx, rax
+            0x48,0xB8,0,0,0,0,0,0,0,0,      // mov rax, imm64
+            0xFF,0xD0,                      // call rax
+        };
+        *(uint64_t*)(byte + 5) = (uint64_t)iputs;
+
+        append(code, byte, sizeof(byte));
     }
     else if ((*p)[0] == 'l' && (*p)[1] == 'e' && (*p)[2] == 't' && !ID((*p)[3])) {
         (*p) += 3;
@@ -247,7 +271,7 @@ state parse_statement(char **p, bytecode *code, variables* vars) {
         setid(p, var.id);
 
         // right hand value
-        var.type = parse_value(p, code, vars);
+        var.type = parse_expr(p, code, vars, MOV, ANY);
 
         // resister
         int i = vars->size;
@@ -266,7 +290,6 @@ state parse_statement(char **p, bytecode *code, variables* vars) {
         append(code, byte, sizeof(byte));
 
         printf("@let %zu %s\n", vars->size, vars->mem[vars->size - 1].id);
-        return LET;
     }
     else if (**p == '{') {
         size_t size = vars->size;
@@ -277,19 +300,15 @@ state parse_statement(char **p, bytecode *code, variables* vars) {
         skip(p);
         vars->size = size;
         printf("@} %zu\n", vars->size);
-        return BLOCK;
     }
     else {
-        parse_value(p, code, vars);
-        skip(p);
-        return EXPR;
+        // parse_expr(p, code, vars);
+        // skip(p);
+        puts("error: state");
+        puts(*p);
+        exit(-1);
     }
-
-    puts("error: state");
-    puts(*p);
-    exit(-1);
 }
-
 
 // 実行可能メモリ
 typedef void (*func_t)();
