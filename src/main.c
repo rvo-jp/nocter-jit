@@ -20,10 +20,6 @@
  */
 #include "bytecode.h"
 
-typedef enum cmd {
-    MOV,
-    ADD
-} cmd;
 
 typedef enum type {
     ANY,
@@ -83,7 +79,7 @@ void setid(char** p, char* mem) {
 //     }
 // }
 
-type parse_value(char** p, bytecode *code, variables* vars, cmd op, type ty) {
+type parse_value(char** p, bytecode *code, variables* vars) {
     if ((*p)[0] == 't' && (*p)[1] == 'r' && (*p)[2] == 'u' && (*p)[3] == 'e' && !ID((*p)[4])) {
         (*p) += 4;
         skip(p);
@@ -111,22 +107,14 @@ type parse_value(char** p, bytecode *code, variables* vars, cmd op, type ty) {
         for (int i = vars->size - 1; i >= 0; i --) {
             variable var = vars->mem[i];
             if (strcmp(var.id, id) == 0) {
-                if (ty != ANY && var.type != ty) {
-                    puts("type-error");
-                    exit(-1);
-                }
                 // printf("%zu %s\n", i+1, var.id);
 
                 uint8_t byte[] = {
-                    0x48, 0, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
+                    0x48, 0x8B, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
                 };
-                switch (op) {
-                    case MOV: byte[1] = 0x8B; break;
-                    case ADD: byte[1] = 0x03; break;
-                }
                 *(int32_t*)(byte + 3) = -((i+1) * 8);
-
                 append(code, byte, sizeof(byte));
+
                 return var.type;
             }
         }
@@ -135,11 +123,6 @@ type parse_value(char** p, bytecode *code, variables* vars, cmd op, type ty) {
         exit(-1);
     }
     else if (**p == '"' || **p == '\'') {
-        if (ty != ANY && ty != STRING) {
-            puts("type-error");
-            exit(-1);
-        }
-
         char* str = *p;
         do {
             if (**p == '\'') (*p) ++;
@@ -183,11 +166,6 @@ type parse_value(char** p, bytecode *code, variables* vars, cmd op, type ty) {
         return STRING;
     }
     else if (NUM(**p)) {
-        if (ty != ANY && ty != INTEGER) {
-            puts("type-error");
-            exit(-1);
-        }
-
         int64_t n = 0;
         do n = n * 10 + (*(*p) ++) - '0';
         while (NUM(**p));
@@ -209,14 +187,64 @@ type parse_value(char** p, bytecode *code, variables* vars, cmd op, type ty) {
     }
 }
 
-type parse_expr(char** p, bytecode *code, variables* vars, cmd op, type ty) {
-    type res = parse_value(p, code, vars, op, ty);
+type parse_expr1(char** p, bytecode *code, variables* vars) {
+    type res = parse_value(p, code, vars);
+
+    for (;;)
+    if (**p == '*') {
+        if (res != INTEGER) {
+            puts("type-error: INT");
+            exit(-1);
+        }
+
+        uint8_t byte1[] = {
+            0x50    // push rax
+        };
+        append(code, byte1, sizeof(byte1));
+
+        (*p) ++;
+        skip(p);
+        if (parse_value(p, code, vars) != INTEGER) {
+            puts("type-error: INT");
+            exit(-1);
+        }
+
+        uint8_t byte2[] = {
+            0x59                    // pop rcx
+            0x48, 0x0F, 0xAF, 0xC1  // imul rax, rcx
+        };
+        append(code, byte2, sizeof(byte2));
+    }
+    else return res;
+}
+
+type parse_expr(char** p, bytecode *code, variables* vars) {
+    type res = parse_expr1(p, code, vars);
 
     for (;;)
     if (**p == '+') {
+        if (res != INTEGER) {
+            puts("type-error: INT");
+            exit(-1);
+        }
+
+        uint8_t byte1[] = {
+            0x50    // push rax
+        };
+        append(code, byte1, sizeof(byte1));
+
         (*p) ++;
         skip(p);
-        res = parse_value(p, code, vars, ADD, res);
+        if (parse_expr1(p, code, vars) != INTEGER) {
+            puts("type-error: INT");
+            exit(-1);
+        }
+
+        uint8_t byte2[] = {
+            0x59                // pop rcx
+            0x48, 0x01, 0xC8    // add rax, rcx
+        };
+        append(code, byte2, sizeof(byte2));
     }
     else return res;
 }
@@ -232,7 +260,10 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
         (*p) += 4;
         skip(p);
 
-        parse_expr(p, code, vars, MOV, STRING);
+        if (parse_expr(p, code, vars) != STRING) {
+            puts("type-error: STRING");
+            exit(-1);
+        }
 
         uint8_t byte[] = {
             0x48,0x89,0xC1,                 // mov rcx, rax
@@ -247,7 +278,10 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
         (*p) += 5;
         skip(p);
 
-        parse_expr(p, code, vars, MOV, INTEGER);
+        if (parse_expr(p, code, vars) != INTEGER) {
+            puts("type-error: INT");
+            exit(-1);
+        }
 
         uint8_t byte[] = {
             0x48,0x89,0xC1,                 // mov rcx, rax
@@ -261,17 +295,15 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
     else if ((*p)[0] == 'l' && (*p)[1] == 'e' && (*p)[2] == 't' && !ID((*p)[3])) {
         (*p) += 3;
         skip(p);
-        variable var;
 
         // id
         if (!ID(**p)) {
             puts("error: not id");
             exit(-1);
         }
+        variable var;
         setid(p, var.id);
-
-        // right hand value
-        var.type = parse_expr(p, code, vars, MOV, ANY);
+        var.type = parse_expr(p, code, vars); // right hand value
 
         // resister
         int i = vars->size;
