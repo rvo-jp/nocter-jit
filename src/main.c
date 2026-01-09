@@ -2,7 +2,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <windows.h>
+#include <stdbool.h>
+// #include <windows.h>
 
 // rax = 式の評価結果: 演算用のレジスタ（アキュムレータ）
 // rdx = 一時退避: データの一時記憶用（データレジスタ）
@@ -22,9 +23,9 @@
 
 
 typedef enum type {
-    ANY,
     STRING,
-    INTEGER
+    INTEGER,
+    COND
 } type;
 
 
@@ -69,15 +70,7 @@ void setid(char** p, char* mem) {
     skip(p);
 }
 
-
-// void assign(char** p) {
-//     if ((*p)[0] == '+' && (*p)[1] == '=') {
-//         (*p) += 2;
-//         skip(p);
-
-        
-//     }
-// }
+type parse_expr(char** p, bytecode *code, variables* vars);
 
 type parse_value(char** p, bytecode *code, variables* vars) {
     if ((*p)[0] == 't' && (*p)[1] == 'r' && (*p)[2] == 'u' && (*p)[3] == 'e' && !ID((*p)[4])) {
@@ -109,11 +102,27 @@ type parse_value(char** p, bytecode *code, variables* vars) {
             if (strcmp(var.id, id) == 0) {
                 // printf("%zu %s\n", i+1, var.id);
 
-                uint8_t byte[] = {
-                    0x48, 0x8B, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
-                };
-                *(int32_t*)(byte + 3) = -((i+1) * 8);
-                append(code, byte, sizeof(byte));
+                if ((*p)[0] == '=' && (*p)[1] != '=') {
+                    (*p) ++;
+                    skip(p);
+                    if (parse_expr(p, code, vars) != var.type) {
+                        puts("type-error");
+                        exit(-1);
+                    }
+
+                    uint8_t byte[] = {
+                        0x48, 0x89, 0x85, 0,0,0,0   // mov [rbp - disp32], rax
+                    };
+                    *(int32_t*)(byte + 3) = -(8 * (i + 1));
+                    append(code, byte, sizeof(byte));
+                }
+                else {
+                    uint8_t byte[] = {
+                        0x48, 0x8B, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
+                    };
+                    *(int32_t*)(byte + 3) = -((i+1) * 8);
+                    append(code, byte, sizeof(byte));
+                }
 
                 return var.type;
             }
@@ -151,12 +160,12 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         // *(uint64_t*)(byte + 9) = (uint64_t)malloc;
         // *(uint32_t*)(byte + 3) = (uint32_t)(size + 1);
         // *(uint32_t*)(byte + 32) = (uint32_t)(size + 1);
-        // *(int32_t*)(byte + 25) = (int32_t)(-(code->dbsize + code->size + 29));
+        // *(int32_t*)(byte + 25) = (int32_t)(-(code->db.size + code->main.size + 29));
 
         uint8_t byte[] = {
             0x48,0x8D,0x05, 0,0,0,0     // lea rax, [rip + disp32]
         };
-        *(int32_t*)(byte + 3) = (int32_t)(-(code->dbsize + code->size + 7));
+        *(int32_t*)(byte + 3) = (int32_t)(-(code->db.size + code->main.size + 7));
 
         append(code, byte, sizeof(byte));
 
@@ -210,7 +219,7 @@ type parse_expr1(char** p, bytecode *code, variables* vars) {
         }
 
         uint8_t byte2[] = {
-            0x59                    // pop rcx
+            0x59,                   // pop rcx
             0x48, 0x0F, 0xAF, 0xC1  // imul rax, rcx
         };
         append(code, byte2, sizeof(byte2));
@@ -241,7 +250,7 @@ type parse_expr(char** p, bytecode *code, variables* vars) {
         }
 
         uint8_t byte2[] = {
-            0x59                // pop rcx
+            0x59,               // pop rcx
             0x48, 0x01, 0xC8    // add rax, rcx
         };
         append(code, byte2, sizeof(byte2));
@@ -249,6 +258,36 @@ type parse_expr(char** p, bytecode *code, variables* vars) {
     else return res;
 }
 
+type parse_cond(char** p, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    type res = parse_expr(p, code, vars);
+
+    for (;;)
+    if ((*p)[0] == '=' && (*p)[1] == '=') {
+        uint8_t byte1[] = {
+            0x50    // push rax
+        };
+        append(code, byte1, sizeof(byte1));
+
+        (*p) += 2;
+        skip(p);
+        if (parse_expr(p, code, vars) != res) {
+            puts("type-error: ==");
+            exit(-1);
+        }
+
+        uint8_t byte2[] = {
+            0x59,                   // pop rcx
+            0x48, 0x39, 0xC8,       // cmp rax, rcx
+            0x0F, 0x00, 0,0,0,0     // je rel32
+        };
+        *(uint8_t*)(byte2 + 5) = sign ? 0x84 : 0x85;
+        *(int32_t*)(byte2 + 6) = (sign ? L_eq : L_ne) - (code->main.size + 10);
+
+        append(code, byte2, sizeof(byte2));
+        res = COND;
+    }
+    else return res;
+}
 
 void iputs(int64_t n) {
     printf("%ld\n", n);
@@ -291,6 +330,31 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
         *(uint64_t*)(byte + 5) = (uint64_t)iputs;
 
         append(code, byte, sizeof(byte));
+    }
+    else if ((*p)[0] == 'i' &&  (*p)[1] == 'f' && !ID((*p)[2])) {
+        (*p) += 2;
+        skip(p);
+
+        char *dp = *p;
+        bytecode dcode = {0};
+
+        if (parse_cond(&dp, &dcode, vars, true, 0, 0) != COND) {
+            puts("type-error: CONDITION");
+            exit(-1);
+        }
+        int32_t L_eq = dcode.main.size + code->main.size;
+
+        parse_statement(&dp, &dcode, vars);
+        int32_t L_ne = dcode.main.size + code->main.size;
+
+        parse_cond(p, code, vars, true, L_eq, L_ne);
+        parse_statement(p, code, vars);
+
+        if ((*p)[0] == 'e' && (*p)[1] == 'l' && (*p)[2] == 's' && (*p)[3] == 'e' && !ID((*p)[4])) {
+            (*p) += 4;
+            skip(p);
+            parse_statement(p, code, vars);
+        }
     }
     else if ((*p)[0] == 'l' && (*p)[1] == 'e' && (*p)[2] == 't' && !ID((*p)[3])) {
         (*p) += 3;
@@ -368,10 +432,10 @@ char* readfile(const char* path) {
 func_t compile(const char* path) {
     // compile
     bytecode code = {
-        .mem = NULL,
-        .size = 0,
-        .dbmem = NULL,
-        .dbsize = 0
+        .main.mem = NULL,
+        .main.size = 0,
+        .db.mem = NULL,
+        .db.size = 0
     };
 
     variables vars = {
@@ -408,31 +472,30 @@ func_t compile(const char* path) {
     // フレームサイズ
     int frame_size = 32 + vars.max * 8;
     frame_size = (frame_size + 15) & ~15;  // 16バイト境界に丸める
-    *(int32_t*)(code.mem + 7) = frame_size; // 埋め込み
+    *(int32_t*)(code.main.mem + 7) = frame_size; // 埋め込み
 
     // db埋め込み
     uint8_t jmp[] = {
         0xE9, 0,0,0,0,     // jmp +N
     };
-    *(int32_t*)(jmp + 1) = code.dbsize;
+    *(int32_t*)(jmp + 1) = code.db.size;
     dbappend(&code, jmp, sizeof(jmp));
 
 
 
     // 実行可能メモリを作成
     uint8_t* execode = (uint8_t*)VirtualAlloc(
-        NULL, code.size + code.dbsize,
+        NULL, code.main.size + code.db.size,
         MEM_COMMIT | MEM_RESERVE,
         PAGE_EXECUTE_READWRITE
     );
     if (!execode) return NULL;
 
-    memcpy(execode, code.dbmem, code.dbsize);
-    memcpy(execode + code.dbsize, code.mem, code.size);
-    free(code.dbmem);
-    free(code.mem);
+    memcpy(execode, code.db.mem, code.db.size);
+    memcpy(execode + code.db.size, code.main.mem, code.main.size);
+    delete_code(code);
 
-    for (int i = 0; i < code.size + code.dbsize; i ++) printf("%x ", execode[i]);
+    for (int i = 0; i < code.main.size + code.db.size; i ++) printf("%x ", execode[i]);
     puts("");
 
     return (func_t)execode;

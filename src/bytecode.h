@@ -7,12 +7,19 @@
 // 実行可能メモリ
 typedef void (*func_t)();
 
-typedef struct bytecode {
+typedef struct byte {
     uint8_t* mem;
     size_t size;
-    uint8_t* dbmem;
-    size_t dbsize;
+} byte;
+
+typedef struct bytecode {
+    byte main;
+    byte db;
 } bytecode;
+
+
+// codeを解放
+void delete_code(bytecode code);
 
 // code2を破壊し、code1に連結
 void concat(bytecode* code1, bytecode* code2);

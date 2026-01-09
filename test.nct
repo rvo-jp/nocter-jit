@@ -1,9 +1,9 @@
 
 let a 12
 let b 6
-let c 3
-iputs a + b + c
+let c = 3
 
+iputs a + b * c
 
-
+if a == b puts "aa"
 
