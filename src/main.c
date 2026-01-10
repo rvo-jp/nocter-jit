@@ -62,6 +62,7 @@ void skip(char** p) {
 
 #define ID(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') 
 #define NUM(c) (c >= '0' && c <= '9')
+#define EOI(c) (!ID(c) && !NUM(c))
 
 void setid(char** p, char* mem) {
     do *mem ++ = *(*p)++;
@@ -258,7 +259,7 @@ type parse_expr(char** p, bytecode *code, variables* vars) {
     else return res;
 }
 
-type parse_cond(char** p, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+type parse_cond1(char** p, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
     type res = parse_expr(p, code, vars);
 
     for (;;)
@@ -281,12 +282,40 @@ type parse_cond(char** p, bytecode *code, variables* vars, bool sign, int32_t L_
             0x0F, 0x00, 0,0,0,0     // je rel32
         };
         *(uint8_t*)(byte2 + 5) = sign ? 0x84 : 0x85;
-        *(int32_t*)(byte2 + 6) = (sign ? L_eq : L_ne) - (code->main.size + 10);
+        *(int32_t*)(byte2 + 6) = L_eq - (code->main.size + 10);
 
         append(code, byte2, sizeof(byte2));
         res = COND;
     }
     else return res;
+}
+
+type parse_cond(char** p, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    char *cp = *p;
+    bytecode ccode = *code;
+    type res = parse_cond1(p, code, vars, sign, L_eq, L_ne);
+
+    if ((*p)[0] == '&' && (*p)[1] == '&') {
+        if (res != COND) {
+            puts("type-error: _ &&");
+            exit(-1);
+        }
+        (*p) = cp;
+        reverse(code, ccode);
+        parse_cond1(p, code, vars, !sign, L_ne, L_eq);
+
+        do {
+            (*p) += 2;
+            skip(p);
+            if (parse_cond1(p, code, vars, !sign, L_ne, L_eq) != res) {
+                puts("type-error: && _");
+                exit(-1);
+            }   
+        }
+        while ((*p)[0] == '&' && (*p)[1] == '&');
+    }
+    
+    return res;
 }
 
 void iputs(int64_t n) {
@@ -335,22 +364,44 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
         (*p) += 2;
         skip(p);
 
-        char *dp = *p;
-        bytecode dcode = {0};
+        int32_t L_eq, L_ne, L_end;
+        char *cp = *p;
+        bytecode ccode = *code;
 
-        if (parse_cond(&dp, &dcode, vars, true, 0, 0) != COND) {
+        if (parse_cond(p, code, vars, true, 0, 0) != COND) {
             puts("type-error: CONDITION");
             exit(-1);
         }
-        int32_t L_eq = dcode.main.size + code->main.size;
+        L_eq = code->main.size;
+        parse_statement(p, code, vars);
 
-        parse_statement(&dp, &dcode, vars);
-        int32_t L_ne = dcode.main.size + code->main.size;
+        if ((*p)[0] == 'e' && (*p)[1] == 'l' && (*p)[2] == 's' && (*p)[3] == 'e' && !ID((*p)[4])) {
+            uint8_t byte[] = {
+                0xE9, 0,0,0,0,  // jmp
+            };
+            append(code, byte, sizeof(byte));
+
+            L_ne = code->main.size;
+            (*p) += 4;
+            skip(p);
+            parse_statement(p, code, vars);
+            L_end = code->main.size;
+        }
+        else L_ne = code->main.size;
+
+        (*p) = cp;
+        reverse(code, ccode);
 
         parse_cond(p, code, vars, true, L_eq, L_ne);
         parse_statement(p, code, vars);
 
         if ((*p)[0] == 'e' && (*p)[1] == 'l' && (*p)[2] == 's' && (*p)[3] == 'e' && !ID((*p)[4])) {
+            uint8_t byte[] = {
+                0xE9, 0,0,0,0,  // jmp
+            };
+            *(int32_t*)(byte + 1) = L_end;
+            append(code, byte, sizeof(byte));
+
             (*p) += 4;
             skip(p);
             parse_statement(p, code, vars);

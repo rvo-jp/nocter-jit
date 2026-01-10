@@ -33,4 +33,7 @@ void dbappend(bytecode* code, uint8_t *dbmem, size_t size);
 // codeのdbにstring追加
 void dbstring(bytecode* code, char *str, size_t size);
 
+// codeの状態をccodeの状態に戻す
+void reverse(bytecode *code, bytecode ccode);
+
 #endif
