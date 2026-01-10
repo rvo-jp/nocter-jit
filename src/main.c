@@ -482,18 +482,9 @@ char* readfile(const char* path) {
 
 func_t compile(const char* path) {
     // compile
-    bytecode code = {
-        .main.mem = NULL,
-        .main.size = 0,
-        .db.mem = NULL,
-        .db.size = 0
-    };
+    bytecode code = {0};
 
-    variables vars = {
-        .mem = NULL,
-        .size = 0,
-        .max = 0
-    };
+    variables vars = {0};
 
 
     uint8_t prologue[] = {
