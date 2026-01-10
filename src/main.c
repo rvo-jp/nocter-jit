@@ -3,11 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
-// #include <windows.h>
+#include <windows.h>
 
-// rax = 式の評価結果: 演算用のレジスタ（アキュムレータ）
-// rdx = 一時退避: データの一時記憶用（データレジスタ）
-
+// rax = 式の評価結果
 // 変数は rspベース disp32 2パス固定フレーム
 // 最終目標は c runtime に一切頼らない構成。OS命令使う
 /**
@@ -193,6 +191,7 @@ type parse_value(char** p, bytecode *code, variables* vars) {
     }
     else {
         puts("error: invalid value");
+        puts(*p);
         exit(-1);
     }
 }
@@ -282,7 +281,31 @@ type parse_cond1(char** p, bytecode *code, variables* vars, bool sign, int32_t L
             0x0F, 0x00, 0,0,0,0     // je rel32
         };
         *(uint8_t*)(byte2 + 5) = sign ? 0x84 : 0x85;
-        *(int32_t*)(byte2 + 6) = L_eq - (code->main.size + 10);
+        *(int32_t*)(byte2 + 6) = L_eq - (code->main.size + sizeof(byte2));
+
+        append(code, byte2, sizeof(byte2));
+        res = COND;
+    }
+    else if ((*p)[0] == '!' && (*p)[1] == '=') {
+        uint8_t byte1[] = {
+            0x50    // push rax
+        };
+        append(code, byte1, sizeof(byte1));
+
+        (*p) += 2;
+        skip(p);
+        if (parse_expr(p, code, vars) != res) {
+            puts("type-error: !=");
+            exit(-1);
+        }
+
+        uint8_t byte2[] = {
+            0x59,                   // pop rcx
+            0x48, 0x39, 0xC8,       // cmp rax, rcx
+            0x0F, 0x00, 0,0,0,0     // jne rel32
+        };
+        *(uint8_t*)(byte2 + 5) = sign ? 0x85 : 0x84;
+        *(int32_t*)(byte2 + 6) = L_eq - (code->main.size + sizeof(byte2));
 
         append(code, byte2, sizeof(byte2));
         res = COND;
@@ -302,12 +325,12 @@ type parse_cond(char** p, bytecode *code, variables* vars, bool sign, int32_t L_
         }
         (*p) = cp;
         reverse(code, ccode);
-        parse_cond1(p, code, vars, !sign, L_ne, L_eq);
+        parse_cond1(p, code, vars, sign, L_eq, L_ne);
 
         do {
             (*p) += 2;
             skip(p);
-            if (parse_cond1(p, code, vars, !sign, L_ne, L_eq) != res) {
+            if (parse_cond1(p, code, vars, sign, L_eq, L_ne) != res) {
                 puts("type-error: && _");
                 exit(-1);
             }   
@@ -392,14 +415,14 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
         (*p) = cp;
         reverse(code, ccode);
 
-        parse_cond(p, code, vars, true, L_eq, L_ne);
+        parse_cond(p, code, vars, false, L_ne, L_eq);
         parse_statement(p, code, vars);
 
         if (L_end != 0) {
             uint8_t byte[] = {
                 0xE9, 0,0,0,0,  // jmp
             };
-            *(int32_t*)(byte + 1) = L_end;
+            *(int32_t*)(byte + 1) = L_end - (code->main.size + sizeof(byte));
             append(code, byte, sizeof(byte));
 
             (*p) += 4;

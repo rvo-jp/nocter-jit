@@ -7,14 +7,14 @@
 // 実行可能メモリ
 typedef void (*func_t)();
 
-typedef struct byte {
+typedef struct bytec {
     uint8_t* mem;
     size_t size;
-} byte;
+} bytec;
 
 typedef struct bytecode {
-    byte main;
-    byte db;
+    bytec main;
+    bytec db;
 } bytecode;
 
 
