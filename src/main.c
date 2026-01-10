@@ -74,7 +74,7 @@ void setid(char** p, char* mem) {
 type parse_expr(char** p, bytecode *code, variables* vars);
 
 type parse_value(char** p, bytecode *code, variables* vars) {
-    if ((*p)[0] == 't' && (*p)[1] == 'r' && (*p)[2] == 'u' && (*p)[3] == 'e' && !ID((*p)[4])) {
+    if ((*p)[0] == 't' && (*p)[1] == 'r' && (*p)[2] == 'u' && (*p)[3] == 'e' && EOI((*p)[4])) {
         (*p) += 4;
         skip(p);
 
@@ -83,7 +83,7 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         };
         append(code, byte, sizeof(byte));
     }
-    else if ((*p)[0] == 'f' && (*p)[1] == 'a' && (*p)[2] == 'l' && (*p)[3] == 's' && (*p)[4] == 'e' && !ID((*p)[5])) {
+    else if ((*p)[0] == 'f' && (*p)[1] == 'a' && (*p)[2] == 'l' && (*p)[3] == 's' && (*p)[4] == 'e' && EOI((*p)[5])) {
         (*p) += 5;
         skip(p);
 
@@ -323,7 +323,7 @@ void iputs(int64_t n) {
 }
 
 void parse_statement(char **p, bytecode *code, variables* vars) {
-    if ((*p)[0] == 'p' && (*p)[1] == 'u' && (*p)[2] == 't' && (*p)[3] == 's' && !ID((*p)[4])) {
+    if ((*p)[0] == 'p' && (*p)[1] == 'u' && (*p)[2] == 't' && (*p)[3] == 's' && EOI((*p)[4])) {
         puts("@puts");
         (*p) += 4;
         skip(p);
@@ -342,7 +342,7 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
 
         append(code, byte, sizeof(byte));
     }
-    else if ((*p)[0] == 'i' &&  (*p)[1] == 'p' && (*p)[2] == 'u' && (*p)[3] == 't' && (*p)[4] == 's' && !ID((*p)[5])) {
+    else if ((*p)[0] == 'i' &&  (*p)[1] == 'p' && (*p)[2] == 'u' && (*p)[3] == 't' && (*p)[4] == 's' && EOI((*p)[5])) {
         (*p) += 5;
         skip(p);
 
@@ -360,11 +360,11 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
 
         append(code, byte, sizeof(byte));
     }
-    else if ((*p)[0] == 'i' &&  (*p)[1] == 'f' && !ID((*p)[2])) {
+    else if ((*p)[0] == 'i' &&  (*p)[1] == 'f' && EOI((*p)[2])) {
         (*p) += 2;
         skip(p);
 
-        int32_t L_eq, L_ne, L_end;
+        int32_t L_eq = 0, L_ne = 0, L_end = 0;
         char *cp = *p;
         bytecode ccode = *code;
 
@@ -375,7 +375,7 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
         L_eq = code->main.size;
         parse_statement(p, code, vars);
 
-        if ((*p)[0] == 'e' && (*p)[1] == 'l' && (*p)[2] == 's' && (*p)[3] == 'e' && !ID((*p)[4])) {
+        if ((*p)[0] == 'e' && (*p)[1] == 'l' && (*p)[2] == 's' && (*p)[3] == 'e' && EOI((*p)[4])) {
             uint8_t byte[] = {
                 0xE9, 0,0,0,0,  // jmp
             };
@@ -395,7 +395,7 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
         parse_cond(p, code, vars, true, L_eq, L_ne);
         parse_statement(p, code, vars);
 
-        if ((*p)[0] == 'e' && (*p)[1] == 'l' && (*p)[2] == 's' && (*p)[3] == 'e' && !ID((*p)[4])) {
+        if (L_end != 0) {
             uint8_t byte[] = {
                 0xE9, 0,0,0,0,  // jmp
             };
@@ -407,7 +407,7 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
             parse_statement(p, code, vars);
         }
     }
-    else if ((*p)[0] == 'l' && (*p)[1] == 'e' && (*p)[2] == 't' && !ID((*p)[3])) {
+    else if ((*p)[0] == 'l' && (*p)[1] == 'e' && (*p)[2] == 't' && EOI((*p)[3])) {
         (*p) += 3;
         skip(p);
 
