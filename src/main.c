@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <windows.h>
+// #include <windows.h>
 
 // rax = 式の評価結果
 // 変数は rspベース disp32 2パス固定フレーム
@@ -18,6 +18,7 @@
  * 6. 新しい割り当ては空き or 末尾に行う
  */
 #include "bytecode.h"
+#include "script.h"
 
 
 typedef enum type {
@@ -54,95 +55,70 @@ typedef struct variables {
 //     return obj;
 // }
 
-void skip(char** p) {
-    while (**p == ' ' || **p == '\r' || **p == '\n') (*p) ++; 
-}
+// == 0F 84
+// != 0F 85
+// < 0F 8C
+// <= 0F 8E
+// > 0F 8F
+// >= 0F 8D
+
+
 
 #define ID(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') 
 #define NUM(c) (c >= '0' && c <= '9')
 #define EOI(c) (!ID(c) && !NUM(c))
 
-void setid(char** p, char* mem) {
-    do *mem ++ = *(*p)++;
-    while (ID(**p) || NUM(**p));
+void setid(script* src, char* mem) {
+    do *mem ++ = *src->p++;
+    while (ID(*src->p) || NUM(*src->p));
     *mem = '\0';
-    skip(p);
+    skip(src);
 }
 
-type parse_expr(char** p, bytecode *code, variables* vars);
+type parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne);
 
-type parse_value(char** p, bytecode *code, variables* vars) {
-    if ((*p)[0] == 't' && (*p)[1] == 'r' && (*p)[2] == 'u' && (*p)[3] == 'e' && EOI((*p)[4])) {
-        (*p) += 4;
-        skip(p);
+type parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    if (*src->p == '(') {
+        src->p += 1;
+        skip(src);
 
-        uint8_t byte[] = {
-            0x48, 0x83, 0xC8, 0xFF   // or rax, -1
-        };
-        append(code, byte, sizeof(byte));
+        type res = parse_expr(src, code, vars, sign, L_eq, L_ne);
+
+        if (*src->p != ')') {
+            error(src, 1);
+            puts("syntax error: )");
+            exit(-1);
+        }
+        src->p += 1;
+        skip(src);
+
+        return res;
     }
-    else if ((*p)[0] == 'f' && (*p)[1] == 'a' && (*p)[2] == 'l' && (*p)[3] == 's' && (*p)[4] == 'e' && EOI((*p)[5])) {
-        (*p) += 5;
-        skip(p);
+    else if (*src->p == '!') {
+        src->p += 1;
+        skip(src);
 
-        uint8_t byte[] = {
-            0x48, 0x31, 0xC0   // xor rax, rax
-        };
-        append(code, byte, sizeof(byte));
-    }
-    else if (ID(**p)) {
-        char id[64];
-        setid(p, id);
-
-        printf("@var %zu\n", vars->size);
-
-        for (int i = vars->size - 1; i >= 0; i --) {
-            variable var = vars->mem[i];
-            if (strcmp(var.id, id) == 0) {
-                // printf("%zu %s\n", i+1, var.id);
-
-                if ((*p)[0] == '=' && (*p)[1] != '=') {
-                    (*p) ++;
-                    skip(p);
-                    if (parse_expr(p, code, vars) != var.type) {
-                        puts("type-error");
-                        exit(-1);
-                    }
-
-                    uint8_t byte[] = {
-                        0x48, 0x89, 0x85, 0,0,0,0   // mov [rbp - disp32], rax
-                    };
-                    *(int32_t*)(byte + 3) = -(8 * (i + 1));
-                    append(code, byte, sizeof(byte));
-                }
-                else {
-                    uint8_t byte[] = {
-                        0x48, 0x8B, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
-                    };
-                    *(int32_t*)(byte + 3) = -((i+1) * 8);
-                    append(code, byte, sizeof(byte));
-                }
-
-                return var.type;
-            }
+        if (parse_expr1(src, code, vars, sign, L_ne, L_eq) != COND) {
+            error(src, 1);
+            puts("type-error: COND");
+            exit(-1);
         }
 
-        printf("error: undefined variable '%s'\n", id);
-        exit(-1);
+        return COND;
     }
-    else if (**p == '"' || **p == '\'') {
-        char* str = *p;
+    else if (*src->p == '"' || *src->p == '\'') {
+        char* str = src->p;
         do {
-            if (**p == '\'') (*p) ++;
-            else if (**p == '\n') puts("error");
-            else if (**p == '\r') puts("error");
-            else (*p) ++;
+            if (*src->p == '\'') src->p ++;
+            else if (*src->p == '\n') puts("error");
+            else if (*src->p == '\r') puts("error");
+            else src->p ++;
         }
-        while (*str != **p);
+        while (*str != *src->p);
         str ++;
-        size_t size = (*p) - str;
-        (*p) ++;
-        skip(p);
+        size_t size = src->p - str;
+        src->p ++;
+        skip(src);
 
         dbstring(code, str, size);
         
@@ -173,11 +149,69 @@ type parse_value(char** p, bytecode *code, variables* vars) {
 
         return STRING;
     }
-    else if (NUM(**p)) {
+    else if (src->p[0] == 't' && src->p[1] == 'r' && src->p[2] == 'u' && src->p[3] == 'e' && EOI(src->p[4])) {
+        src->p += 4;
+        skip(src);
+
+        uint8_t byte[] = {
+            0x48, 0x83, 0xC8, 0xFF   // or rax, -1
+        };
+        append(code, byte, sizeof(byte));
+    }
+    else if (src->p[0] == 'f' && src->p[1] == 'a' && src->p[2] == 'l' && src->p[3] == 's' && src->p[4] == 'e' && EOI(src->p[5])) {
+        src->p += 5;
+        skip(src);
+
+        uint8_t byte[] = {
+            0x48, 0x31, 0xC0   // xor rax, rax
+        };
+        append(code, byte, sizeof(byte));
+    }
+    else if (ID(*src->p)) {
+        char id[64];
+        setid(src, id);
+
+        printf("@var %zu\n", vars->size);
+
+        for (int i = vars->size - 1; i >= 0; i --) {
+            variable var = vars->mem[i];
+            if (strcmp(var.id, id) == 0) {
+                // printf("%zu %s\n", i+1, var.id);
+
+                if (src->p[0] == '=' && src->p[1] != '=') {
+                    src->p ++;
+                    skip(src);
+                    if (parse_expr(src, code, vars, 0, 0, 0) != var.type) {
+                        puts("type-error");
+                        exit(-1);
+                    }
+
+                    uint8_t byte[] = {
+                        0x48, 0x89, 0x85, 0,0,0,0   // mov [rbp - disp32], rax
+                    };
+                    *(int32_t*)(byte + 3) = -(8 * (i + 1));
+                    append(code, byte, sizeof(byte));
+                }
+                else {
+                    uint8_t byte[] = {
+                        0x48, 0x8B, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
+                    };
+                    *(int32_t*)(byte + 3) = -((i+1) * 8);
+                    append(code, byte, sizeof(byte));
+                }
+
+                return var.type;
+            }
+        }
+
+        printf("error: undefined variable '%s'\n", id);
+        exit(-1);
+    }
+    else if (NUM(*src->p)) {
         int64_t n = 0;
-        do n = n * 10 + (*(*p) ++) - '0';
-        while (NUM(**p));
-        skip(p);
+        do n = n * 10 + (*src->p ++) - '0';
+        while (NUM(*src->p));
+        skip(src);
 
         uint8_t byte[] = {
             0x48, 0xB8, 0,0,0,0,0,0,0,0   // mov rax, imm64
@@ -190,17 +224,17 @@ type parse_value(char** p, bytecode *code, variables* vars) {
         return INTEGER;
     }
     else {
+        error(src, 1);
         puts("error: invalid value");
-        puts(*p);
         exit(-1);
     }
 }
 
-type parse_expr1(char** p, bytecode *code, variables* vars) {
-    type res = parse_value(p, code, vars);
+type parse_expr2(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    type res = parse_expr1(src, code, vars, sign, L_eq, L_ne);
 
     for (;;)
-    if (**p == '*') {
+    if (*src->p == '*') {
         if (res != INTEGER) {
             puts("type-error: INT");
             exit(-1);
@@ -211,9 +245,9 @@ type parse_expr1(char** p, bytecode *code, variables* vars) {
         };
         append(code, byte1, sizeof(byte1));
 
-        (*p) ++;
-        skip(p);
-        if (parse_value(p, code, vars) != INTEGER) {
+        src->p ++;
+        skip(src);
+        if (parse_expr1(src, code, vars, sign, L_eq, L_ne) != INTEGER) {
             puts("type-error: INT");
             exit(-1);
         }
@@ -227,11 +261,11 @@ type parse_expr1(char** p, bytecode *code, variables* vars) {
     else return res;
 }
 
-type parse_expr(char** p, bytecode *code, variables* vars) {
-    type res = parse_expr1(p, code, vars);
+type parse_expr3(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    type res = parse_expr2(src, code, vars, sign, L_eq, L_ne);
 
     for (;;)
-    if (**p == '+') {
+    if (*src->p == '+') {
         if (res != INTEGER) {
             puts("type-error: INT");
             exit(-1);
@@ -242,9 +276,9 @@ type parse_expr(char** p, bytecode *code, variables* vars) {
         };
         append(code, byte1, sizeof(byte1));
 
-        (*p) ++;
-        skip(p);
-        if (parse_expr1(p, code, vars) != INTEGER) {
+        src->p ++;
+        skip(src);
+        if (parse_expr2(src, code, vars, sign, L_eq, L_ne) != INTEGER) {
             puts("type-error: INT");
             exit(-1);
         }
@@ -258,19 +292,19 @@ type parse_expr(char** p, bytecode *code, variables* vars) {
     else return res;
 }
 
-type parse_cond1(char** p, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
-    type res = parse_expr(p, code, vars);
+type parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    type res = parse_expr3(src, code, vars, sign, L_eq, L_ne);
 
     for (;;)
-    if ((*p)[0] == '=' && (*p)[1] == '=') {
+    if (src->p[0] == '=' && src->p[1] == '=') {
         uint8_t byte1[] = {
             0x50    // push rax
         };
         append(code, byte1, sizeof(byte1));
 
-        (*p) += 2;
-        skip(p);
-        if (parse_expr(p, code, vars) != res) {
+        src->p += 2;
+        skip(src);
+        if (parse_expr3(src, code, vars, sign, L_eq, L_ne) != res) {
             puts("type-error: ==");
             exit(-1);
         }
@@ -286,15 +320,15 @@ type parse_cond1(char** p, bytecode *code, variables* vars, bool sign, int32_t L
         append(code, byte2, sizeof(byte2));
         res = COND;
     }
-    else if ((*p)[0] == '!' && (*p)[1] == '=') {
+    else if (src->p[0] == '!' && src->p[1] == '=') {
         uint8_t byte1[] = {
             0x50    // push rax
         };
         append(code, byte1, sizeof(byte1));
 
-        (*p) += 2;
-        skip(p);
-        if (parse_expr(p, code, vars) != res) {
+        src->p += 2;
+        skip(src);
+        if (parse_expr3(src, code, vars, sign, L_eq, L_ne) != res) {
             puts("type-error: !=");
             exit(-1);
         }
@@ -313,45 +347,49 @@ type parse_cond1(char** p, bytecode *code, variables* vars, bool sign, int32_t L
     else return res;
 }
 
-type parse_cond(char** p, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
-    char *cp = *p;
+type parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    char *cp = src->p;
     bytecode ccode = *code;
-    type res = parse_cond1(p, code, vars, sign, L_eq, L_ne);
+    type res = parse_expr4(src, code, vars, sign, L_eq, L_ne);
 
-    if ((*p)[0] == '&' && (*p)[1] == '&') {
+    if (src->p[0] == '&' && src->p[1] == '&') {
         if (res != COND) {
             puts("type-error: _ &&");
             exit(-1);
         }
-        (*p) = cp;
+        src->p = cp;
         reverse(code, ccode);
-        parse_cond1(p, code, vars, sign, L_eq, L_ne);
+        parse_expr4(src, code, vars, sign, L_eq, L_ne);
 
         do {
-            (*p) += 2;
-            skip(p);
-            if (parse_cond1(p, code, vars, sign, L_eq, L_ne) != res) {
+            src->p += 2;
+            skip(src);
+            if (parse_expr4(src, code, vars, sign, L_eq, L_ne) != res) {
                 puts("type-error: && _");
                 exit(-1);
             }   
         }
-        while ((*p)[0] == '&' && (*p)[1] == '&');
+        while (src->p[0] == '&' && src->p[1] == '&');
     }
     
     return res;
 }
 
+
+
 void iputs(int64_t n) {
     printf("%ld\n", n);
 }
 
-void parse_statement(char **p, bytecode *code, variables* vars) {
-    if ((*p)[0] == 'p' && (*p)[1] == 'u' && (*p)[2] == 't' && (*p)[3] == 's' && EOI((*p)[4])) {
-        puts("@puts");
-        (*p) += 4;
-        skip(p);
+void parse_statement_single(script* src, bytecode *code, variables* vars);
 
-        if (parse_expr(p, code, vars) != STRING) {
+void parse_statement(script* src, bytecode *code, variables* vars) {
+    if (src->p[0] == 'p' && src->p[1] == 'u' && src->p[2] == 't' && src->p[3] == 's' && EOI(src->p[4])) {
+        puts("@puts");
+        src->p += 4;
+        skip(src);
+
+        if (parse_expr(src, code, vars, 0, 0, 0) != STRING) {
             puts("type-error: STRING");
             exit(-1);
         }
@@ -365,11 +403,11 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
 
         append(code, byte, sizeof(byte));
     }
-    else if ((*p)[0] == 'i' &&  (*p)[1] == 'p' && (*p)[2] == 'u' && (*p)[3] == 't' && (*p)[4] == 's' && EOI((*p)[5])) {
-        (*p) += 5;
-        skip(p);
+    else if (src->p[0] == 'i' &&  src->p[1] == 'p' && src->p[2] == 'u' && src->p[3] == 't' && src->p[4] == 's' && EOI(src->p[5])) {
+        src->p += 5;
+        skip(src);
 
-        if (parse_expr(p, code, vars) != INTEGER) {
+        if (parse_expr(src, code, vars, 0, 0, 0) != INTEGER) {
             puts("type-error: INT");
             exit(-1);
         }
@@ -383,40 +421,40 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
 
         append(code, byte, sizeof(byte));
     }
-    else if ((*p)[0] == 'i' &&  (*p)[1] == 'f' && EOI((*p)[2])) {
-        (*p) += 2;
-        skip(p);
+    else if (src->p[0] == 'i' &&  src->p[1] == 'f' && EOI(src->p[2])) {
+        src->p += 2;
+        skip(src);
 
         int32_t L_eq = 0, L_ne = 0, L_end = 0;
-        char *cp = *p;
+        char *cp = src->p;
         bytecode ccode = *code;
 
-        if (parse_cond(p, code, vars, true, 0, 0) != COND) {
+        if (parse_expr(src, code, vars, true, 0, 0) != COND) {
             puts("type-error: CONDITION");
             exit(-1);
         }
         L_eq = code->main.size;
-        parse_statement(p, code, vars);
+        parse_statement(src, code, vars);
 
-        if ((*p)[0] == 'e' && (*p)[1] == 'l' && (*p)[2] == 's' && (*p)[3] == 'e' && EOI((*p)[4])) {
+        if (src->p[0] == 'e' && src->p[1] == 'l' && src->p[2] == 's' && src->p[3] == 'e' && EOI(src->p[4])) {
             uint8_t byte[] = {
                 0xE9, 0,0,0,0,  // jmp
             };
             append(code, byte, sizeof(byte));
 
             L_ne = code->main.size;
-            (*p) += 4;
-            skip(p);
-            parse_statement(p, code, vars);
+            src->p += 4;
+            skip(src);
+            parse_statement(src, code, vars);
             L_end = code->main.size;
         }
         else L_ne = code->main.size;
 
-        (*p) = cp;
+        src->p = cp;
         reverse(code, ccode);
 
-        parse_cond(p, code, vars, false, L_ne, L_eq);
-        parse_statement(p, code, vars);
+        parse_expr(src, code, vars, false, L_ne, L_eq);
+        parse_statement(src, code, vars);
 
         if (L_end != 0) {
             uint8_t byte[] = {
@@ -425,23 +463,50 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
             *(int32_t*)(byte + 1) = L_end - (code->main.size + sizeof(byte));
             append(code, byte, sizeof(byte));
 
-            (*p) += 4;
-            skip(p);
-            parse_statement(p, code, vars);
+            src->p += 4;
+            skip(src);
+            parse_statement(src, code, vars);
         }
     }
-    else if ((*p)[0] == 'l' && (*p)[1] == 'e' && (*p)[2] == 't' && EOI((*p)[3])) {
-        (*p) += 3;
-        skip(p);
+    else if (*src->p == '{') {
+        size_t size = vars->size;
+        src->p ++;
+        skip(src);
+        while (*src->p != '}') parse_statement_single(src, code, vars);
+        src->p ++;
+        skip(src);
+        vars->size = size;
+        printf("@} %zu\n", vars->size);
+    }
+    else {
+        char *cp = src->p;
+        bytecode ccode = *code;
+        
+        type res = parse_expr(src, code, vars, 0, 0, 0);
+
+        if (res == COND) {
+            int32_t L_end = code->main.size;
+            src->p = cp;
+            reverse(code, ccode);
+
+            parse_expr(src, code, vars, 0, L_end, L_end);
+        }
+    }
+}
+
+void parse_statement_single(script* src, bytecode *code, variables* vars) {
+    if (src->p[0] == 'l' && src->p[1] == 'e' && src->p[2] == 't' && EOI(src->p[3])) {
+        src->p += 3;
+        skip(src);
 
         // id
-        if (!ID(**p)) {
+        if (!ID(*src->p)) {
             puts("error: not id");
             exit(-1);
         }
         variable var;
-        setid(p, var.id);
-        var.type = parse_expr(p, code, vars); // right hand value
+        setid(src->p, var.id);
+        var.type = parse_expr(src, code, vars, 0, 0, 0); // right hand value
 
         // resister
         int i = vars->size;
@@ -461,54 +526,44 @@ void parse_statement(char **p, bytecode *code, variables* vars) {
 
         printf("@let %zu %s\n", vars->size, vars->mem[vars->size - 1].id);
     }
-    else if (**p == '{') {
-        size_t size = vars->size;
-        (*p) ++;
-        skip(p);
-        while (**p != '}') parse_statement(p, code, vars);
-        (*p) ++;
-        skip(p);
-        vars->size = size;
-        printf("@} %zu\n", vars->size);
+    else if (src->p[0] == 'i' && src->p[1] == 'm' && src->p[2] == 'p' && src->p[3] == 'o' && src->p[4] == 'r' && src->p[5] == 't' && EOI(src->p[6])) {
+        src->p += 6;
+        skip(src);
+
+        char path[1024];
+        size_t len = strrchr(src->file, '\\') + 1 - src->file;
+        memcpy(path, src->file, len);
+        char* p = path + len;
+
+        script csrc = *src;
+        while (*src->p != ' ') *p ++ = *src->p ++;
+        *p = '\0';
+
+        char abs_path[1024];
+        if (GetFullPathNameA(path, 1024, abs_path, NULL) == 0) {
+            error(&csrc, src->p - csrc.p);
+            puts("error: file not found");
+            exit(-1);
+        }
+
+        script new_src = loadscript(abs_path);
+        skip(&new_src);
+        while (*new_src.p != '\0') parse_statement_single(&new_src, code, vars);
+        free(new_src.head);
+        skip(src);
     }
-    else {
-        // parse_expr(p, code, vars);
-        // skip(p);
-        puts("error: state");
-        puts(*p);
-        exit(-1);
-    }
+    else parse_statement(src, code, vars);
 }
 
 // 実行可能メモリ
 typedef void (*func_t)();
 
-// malloc
-char* readfile(const char* path) {
-    FILE* fp = fopen(path, "rb");
-    if (!fp) {
-        puts("error: file not found");
-        exit(-1);
-    }
 
-    fseek(fp, 0, SEEK_END);
-    size_t flen = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-
-    char* source = malloc(flen + 1);
-    fread(source, 1, flen, fp);
-    source[flen] = '\0';
-    fclose(fp);
-
-    return source;
-}
 
 func_t compile(const char* path) {
     // compile
     bytecode code = {0};
-
     variables vars = {0};
-
 
     uint8_t prologue[] = {
         0x55,                       // push rbp
@@ -517,12 +572,16 @@ func_t compile(const char* path) {
     };
     append(&code, prologue, sizeof(prologue));
 
+    char abs_path[1024];
+    if (GetFullPathNameA(path, 1024, abs_path, NULL) == 0) {
+        puts("error: file not found");
+        exit(-1);
+    }
 
-    char *source = readfile(path), *p = source;
-    skip(&p);
-    while (*p != '\0') parse_statement(&p, &code, &vars);
-    free(vars.mem);
-    free(source);
+    script src = loadscript(abs_path);
+    skip(&src);
+    while (*src.p != '\0') parse_statement_single(&src, &code, &vars);
+    free(src.head);
 
     uint8_t epilogue[] = {
         0x48, 0x89, 0xEC,   // mov rsp, rbp
@@ -538,6 +597,7 @@ func_t compile(const char* path) {
     int frame_size = 32 + vars.max * 8;
     frame_size = (frame_size + 15) & ~15;  // 16バイト境界に丸める
     *(int32_t*)(code.main.mem + 7) = frame_size; // 埋め込み
+    free(vars.mem);
 
     // db埋め込み
     uint8_t jmp[] = {
