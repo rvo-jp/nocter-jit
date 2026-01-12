@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
-// #include <windows.h>
+#include <windows.h>
 
 // rax = 式の評価結果
 // 変数は rspベース disp32 2パス固定フレーム
@@ -24,8 +24,17 @@
 typedef enum type {
     STRING,
     INTEGER,
-    COND
+    BOOL
 } type;
+
+typedef struct expr {
+    enum op {
+        VALUE,
+        CONDITON,
+        MODIFIABLE
+    } op;
+    type tp;
+} expr;
 
 
 typedef struct variable {
@@ -75,14 +84,15 @@ void setid(script* src, char* mem) {
     skip(src);
 }
 
-type parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne);
+expr parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne);
 
-type parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+// ()
+expr parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
     if (*src->p == '(') {
         src->p += 1;
         skip(src);
 
-        type res = parse_expr(src, code, vars, sign, L_eq, L_ne);
+        expr res = parse_expr(src, code, vars, sign, L_eq, L_ne);
 
         if (*src->p != ')') {
             error(src, 1);
@@ -98,13 +108,16 @@ type parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_
         src->p += 1;
         skip(src);
 
-        if (parse_expr1(src, code, vars, sign, L_ne, L_eq) != COND) {
+        if (parse_expr1(src, code, vars, sign, L_ne, L_eq).op != CONDITON) {
             error(src, 1);
             puts("type-error: COND");
             exit(-1);
         }
 
-        return COND;
+        return (expr){
+            .op = CONDITON,
+            .tp = BOOL
+        };
     }
     else if (*src->p == '"' || *src->p == '\'') {
         char* str = src->p;
@@ -147,7 +160,10 @@ type parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_
         // gc.objects = こいつ(rax)
         // [ type | marked | next(gc.objects) | len | 'A' 'A' 'A' '\0' ]
 
-        return STRING;
+        return (expr){
+            .op = VALUE,
+            .tp = STRING
+        };
     }
     else if (src->p[0] == 't' && src->p[1] == 'r' && src->p[2] == 'u' && src->p[3] == 'e' && EOI(src->p[4])) {
         src->p += 4;
@@ -168,42 +184,31 @@ type parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_
         append(code, byte, sizeof(byte));
     }
     else if (ID(*src->p)) {
+        script csrc = *src;
         char id[64];
         setid(src, id);
 
-        printf("@var %zu\n", vars->size);
+        // printf("@var %zu\n", vars->size);
 
         for (int i = vars->size - 1; i >= 0; i --) {
             variable var = vars->mem[i];
             if (strcmp(var.id, id) == 0) {
                 // printf("%zu %s\n", i+1, var.id);
 
-                if (src->p[0] == '=' && src->p[1] != '=') {
-                    src->p ++;
-                    skip(src);
-                    if (parse_expr(src, code, vars, 0, 0, 0) != var.type) {
-                        puts("type-error");
-                        exit(-1);
-                    }
+                uint8_t byte[] = {
+                    0x48, 0x8B, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
+                };
+                *(int32_t*)(byte + 3) = -((i+1) * 8);
+                append(code, byte, sizeof(byte));
 
-                    uint8_t byte[] = {
-                        0x48, 0x89, 0x85, 0,0,0,0   // mov [rbp - disp32], rax
-                    };
-                    *(int32_t*)(byte + 3) = -(8 * (i + 1));
-                    append(code, byte, sizeof(byte));
-                }
-                else {
-                    uint8_t byte[] = {
-                        0x48, 0x8B, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
-                    };
-                    *(int32_t*)(byte + 3) = -((i+1) * 8);
-                    append(code, byte, sizeof(byte));
-                }
-
-                return var.type;
+                return (expr){
+                    .op = MODIFIABLE,
+                    .tp = var.type
+                };
             }
         }
 
+        error(&csrc, 1);
         printf("error: undefined variable '%s'\n", id);
         exit(-1);
     }
@@ -217,11 +222,14 @@ type parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_
             0x48, 0xB8, 0,0,0,0,0,0,0,0   // mov rax, imm64
         };
         *(int64_t*)(byte + 2) = n;
-        
+
         // printf("@n: %ld\n", n);
         append(code, byte, sizeof(byte));
 
-        return INTEGER;
+        return (expr){
+            .op = VALUE,
+            .tp = INTEGER
+        };
     }
     else {
         error(src, 1);
@@ -230,12 +238,13 @@ type parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_
     }
 }
 
-type parse_expr2(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
-    type res = parse_expr1(src, code, vars, sign, L_eq, L_ne);
+// *
+expr parse_expr2(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    expr res = parse_expr1(src, code, vars, sign, L_eq, L_ne);
 
     for (;;)
     if (*src->p == '*') {
-        if (res != INTEGER) {
+        if (res.tp != INTEGER) {
             puts("type-error: INT");
             exit(-1);
         }
@@ -247,7 +256,7 @@ type parse_expr2(script* src, bytecode *code, variables* vars, bool sign, int32_
 
         src->p ++;
         skip(src);
-        if (parse_expr1(src, code, vars, sign, L_eq, L_ne) != INTEGER) {
+        if (parse_expr1(src, code, vars, sign, L_eq, L_ne).tp != INTEGER) {
             puts("type-error: INT");
             exit(-1);
         }
@@ -261,12 +270,13 @@ type parse_expr2(script* src, bytecode *code, variables* vars, bool sign, int32_
     else return res;
 }
 
-type parse_expr3(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
-    type res = parse_expr2(src, code, vars, sign, L_eq, L_ne);
+// +
+expr parse_expr3(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    expr res = parse_expr2(src, code, vars, sign, L_eq, L_ne);
 
     for (;;)
     if (*src->p == '+') {
-        if (res != INTEGER) {
+        if (res.tp != INTEGER) {
             puts("type-error: INT");
             exit(-1);
         }
@@ -278,7 +288,7 @@ type parse_expr3(script* src, bytecode *code, variables* vars, bool sign, int32_
 
         src->p ++;
         skip(src);
-        if (parse_expr2(src, code, vars, sign, L_eq, L_ne) != INTEGER) {
+        if (parse_expr2(src, code, vars, sign, L_eq, L_ne).tp != INTEGER) {
             puts("type-error: INT");
             exit(-1);
         }
@@ -292,8 +302,9 @@ type parse_expr3(script* src, bytecode *code, variables* vars, bool sign, int32_
     else return res;
 }
 
-type parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
-    type res = parse_expr3(src, code, vars, sign, L_eq, L_ne);
+// == !=
+expr parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    expr res = parse_expr3(src, code, vars, sign, L_eq, L_ne);
 
     for (;;)
     if (src->p[0] == '=' && src->p[1] == '=') {
@@ -304,7 +315,7 @@ type parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_
 
         src->p += 2;
         skip(src);
-        if (parse_expr3(src, code, vars, sign, L_eq, L_ne) != res) {
+        if (parse_expr3(src, code, vars, sign, L_eq, L_ne).tp != res.tp) {
             puts("type-error: ==");
             exit(-1);
         }
@@ -318,7 +329,10 @@ type parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_
         *(int32_t*)(byte2 + 6) = L_eq - (code->main.size + sizeof(byte2));
 
         append(code, byte2, sizeof(byte2));
-        res = COND;
+        res = (expr){
+            .op = CONDITON,
+            .tp = BOOL
+        };
     }
     else if (src->p[0] == '!' && src->p[1] == '=') {
         uint8_t byte1[] = {
@@ -328,7 +342,7 @@ type parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_
 
         src->p += 2;
         skip(src);
-        if (parse_expr3(src, code, vars, sign, L_eq, L_ne) != res) {
+        if (parse_expr3(src, code, vars, sign, L_eq, L_ne).tp != res.tp) {
             puts("type-error: !=");
             exit(-1);
         }
@@ -342,32 +356,37 @@ type parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_
         *(int32_t*)(byte2 + 6) = L_eq - (code->main.size + sizeof(byte2));
 
         append(code, byte2, sizeof(byte2));
-        res = COND;
+        res = (expr){
+            .op = CONDITON,
+            .tp = BOOL
+        };
     }
     else return res;
 }
 
-type parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
-    char *cp = src->p;
+// &&
+expr parse_expr5(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    script csrc = *src;
     bytecode ccode = *code;
-    type res = parse_expr4(src, code, vars, sign, L_eq, L_ne);
+    expr res = parse_expr4(src, code, vars, sign, L_eq, L_ne);
 
     if (src->p[0] == '&' && src->p[1] == '&') {
-        if (res != COND) {
+        if (res.op != CONDITON) {
+            error(src, 2);
             puts("type-error: _ &&");
             exit(-1);
         }
-        src->p = cp;
+        *src = csrc;
         reverse(code, ccode);
         parse_expr4(src, code, vars, sign, L_eq, L_ne);
 
         do {
             src->p += 2;
             skip(src);
-            if (parse_expr4(src, code, vars, sign, L_eq, L_ne) != res) {
+            if (parse_expr4(src, code, vars, sign, L_eq, L_ne).op != CONDITON) {
                 puts("type-error: && _");
                 exit(-1);
-            }   
+            }
         }
         while (src->p[0] == '&' && src->p[1] == '&');
     }
@@ -375,7 +394,38 @@ type parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t
     return res;
 }
 
+// =
+expr parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+    script csrc = *src;
+    bytecode ccode = *code;
+    expr res = parse_expr5(src, code, vars, sign, L_eq, L_ne);
 
+    if (*src->p == '=') {
+        if (res.op != MODIFIABLE) {
+            error(src, 1);
+            puts("error: expected modifiable lvalue");
+            exit(-1);
+        }
+        script rsrc = *src;
+
+        reverse(code, ccode);
+        src->p += 1;
+        skip(src);
+        if (parse_expr(src, code, vars, sign, L_eq, L_ne).tp != res.tp) {
+            error(&rsrc, 1);
+            puts("type-error: ");
+            exit(-1);
+        }
+        parse_expr5(&csrc, code, vars, sign, L_eq, L_ne);
+
+        return (expr){
+            .op = VALUE,
+            .tp = res.tp
+        };
+    }
+
+    return res;
+}
 
 void iputs(int64_t n) {
     printf("%ld\n", n);
@@ -389,7 +439,7 @@ void parse_statement(script* src, bytecode *code, variables* vars) {
         src->p += 4;
         skip(src);
 
-        if (parse_expr(src, code, vars, 0, 0, 0) != STRING) {
+        if (parse_expr(src, code, vars, 0, 0, 0).tp != STRING) {
             puts("type-error: STRING");
             exit(-1);
         }
@@ -407,7 +457,7 @@ void parse_statement(script* src, bytecode *code, variables* vars) {
         src->p += 5;
         skip(src);
 
-        if (parse_expr(src, code, vars, 0, 0, 0) != INTEGER) {
+        if (parse_expr(src, code, vars, 0, 0, 0).tp != INTEGER) {
             puts("type-error: INT");
             exit(-1);
         }
@@ -429,7 +479,7 @@ void parse_statement(script* src, bytecode *code, variables* vars) {
         char *cp = src->p;
         bytecode ccode = *code;
 
-        if (parse_expr(src, code, vars, true, 0, 0) != COND) {
+        if (parse_expr(src, code, vars, true, 0, 0).op != CONDITON) {
             puts("type-error: CONDITION");
             exit(-1);
         }
@@ -482,13 +532,12 @@ void parse_statement(script* src, bytecode *code, variables* vars) {
         char *cp = src->p;
         bytecode ccode = *code;
         
-        type res = parse_expr(src, code, vars, 0, 0, 0);
+        expr res = parse_expr(src, code, vars, 0, 0, 0);
 
-        if (res == COND) {
+        if (res.op == CONDITON) {
             int32_t L_end = code->main.size;
             src->p = cp;
             reverse(code, ccode);
-
             parse_expr(src, code, vars, 0, L_end, L_end);
         }
     }
@@ -506,7 +555,7 @@ void parse_statement_single(script* src, bytecode *code, variables* vars) {
         }
         variable var;
         setid(src->p, var.id);
-        var.type = parse_expr(src, code, vars, 0, 0, 0); // right hand value
+        var.type = parse_expr(src, code, vars, 0, 0, 0).tp; // right hand value
 
         // resister
         int i = vars->size;
