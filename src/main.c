@@ -86,8 +86,25 @@ void setid(script* src, char* mem) {
 
 expr parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne);
 
+type parse_value(script* src, bytecode *code, variables* vars) {
+    script csrc = *src;
+    bytecode ccode = *code;
+    expr res = parse_expr(src, code, vars, 0, 0, 0);
+
+    if (res.op == CONDITON) {
+        int32_t L_eq = code->main.size;
+        int32_t L_ne = code->main.size + 4;
+
+        
+    }
+    else if (res.op == MODIFIABLE) {
+
+    }
+    else return res.tp;
+}
+
 // ()
-expr parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+expr parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne, bool assign) {
     if (*src->p == '(') {
         src->p += 1;
         skip(src);
@@ -103,21 +120,6 @@ expr parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_
         skip(src);
 
         return res;
-    }
-    else if (*src->p == '!') {
-        src->p += 1;
-        skip(src);
-
-        if (parse_expr1(src, code, vars, sign, L_ne, L_eq).op != CONDITON) {
-            error(src, 1);
-            puts("type-error: COND");
-            exit(-1);
-        }
-
-        return (expr){
-            .op = CONDITON,
-            .tp = BOOL
-        };
     }
     else if (*src->p == '"' || *src->p == '\'') {
         char* str = src->p;
@@ -195,11 +197,20 @@ expr parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_
             if (strcmp(var.id, id) == 0) {
                 // printf("%zu %s\n", i+1, var.id);
 
-                uint8_t byte[] = {
-                    0x48, 0x8B, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
-                };
-                *(int32_t*)(byte + 3) = -((i+1) * 8);
-                append(code, byte, sizeof(byte));
+                if (assign) {
+                    uint8_t byte[] = {
+                        0x48, 0x89, 0x85, 0,0,0,0   // mov [rbp - disp32], rax
+                    };
+                    *(int32_t*)(byte + 3) = -((i+1) * 8);
+                    append(code, byte, sizeof(byte));
+                }
+                else {
+                    uint8_t byte[] = {
+                        0x48, 0x8B, 0x85, 0,0,0,0   // mov rax, [rbp - disp32]
+                    };
+                    *(int32_t*)(byte + 3) = -((i+1) * 8);
+                    append(code, byte, sizeof(byte));
+                }
 
                 return (expr){
                     .op = MODIFIABLE,
@@ -238,9 +249,30 @@ expr parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_
     }
 }
 
+// !
+expr parse_expr2(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne, bool assign) {
+    if (*src->p == '!') {
+        src->p += 1;
+        skip(src);
+
+        if (parse_expr2(src, code, vars, sign, L_ne, L_eq, assign).op != CONDITON) {
+            error(src, 1);
+            puts("type-error: COND");
+            exit(-1);
+        }
+
+        return (expr){
+            .op = CONDITON,
+            .tp = BOOL
+        };
+    }
+    
+    return parse_expr1(src, code, vars, sign, L_eq, L_ne, assign);
+}
+
 // *
-expr parse_expr2(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
-    expr res = parse_expr1(src, code, vars, sign, L_eq, L_ne);
+expr parse_expr3(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne, bool assign) {
+    expr res = parse_expr2(src, code, vars, sign, L_eq, L_ne, assign);
 
     for (;;)
     if (*src->p == '*') {
@@ -256,7 +288,7 @@ expr parse_expr2(script* src, bytecode *code, variables* vars, bool sign, int32_
 
         src->p ++;
         skip(src);
-        if (parse_expr1(src, code, vars, sign, L_eq, L_ne).tp != INTEGER) {
+        if (parse_expr2(src, code, vars, sign, L_eq, L_ne, assign).tp != INTEGER) {
             puts("type-error: INT");
             exit(-1);
         }
@@ -271,8 +303,8 @@ expr parse_expr2(script* src, bytecode *code, variables* vars, bool sign, int32_
 }
 
 // +
-expr parse_expr3(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
-    expr res = parse_expr2(src, code, vars, sign, L_eq, L_ne);
+expr parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne, bool assign) {
+    expr res = parse_expr3(src, code, vars, sign, L_eq, L_ne, assign);
 
     for (;;)
     if (*src->p == '+') {
@@ -288,7 +320,7 @@ expr parse_expr3(script* src, bytecode *code, variables* vars, bool sign, int32_
 
         src->p ++;
         skip(src);
-        if (parse_expr2(src, code, vars, sign, L_eq, L_ne).tp != INTEGER) {
+        if (parse_expr3(src, code, vars, sign, L_eq, L_ne, assign).tp != INTEGER) {
             puts("type-error: INT");
             exit(-1);
         }
@@ -303,8 +335,8 @@ expr parse_expr3(script* src, bytecode *code, variables* vars, bool sign, int32_
 }
 
 // == !=
-expr parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
-    expr res = parse_expr3(src, code, vars, sign, L_eq, L_ne);
+expr parse_expr5(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne, bool assign) {
+    expr res = parse_expr4(src, code, vars, sign, L_eq, L_ne, assign);
 
     for (;;)
     if (src->p[0] == '=' && src->p[1] == '=') {
@@ -315,7 +347,7 @@ expr parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_
 
         src->p += 2;
         skip(src);
-        if (parse_expr3(src, code, vars, sign, L_eq, L_ne).tp != res.tp) {
+        if (parse_expr4(src, code, vars, sign, L_eq, L_ne, assign).tp != res.tp) {
             puts("type-error: ==");
             exit(-1);
         }
@@ -342,7 +374,7 @@ expr parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_
 
         src->p += 2;
         skip(src);
-        if (parse_expr3(src, code, vars, sign, L_eq, L_ne).tp != res.tp) {
+        if (parse_expr4(src, code, vars, sign, L_eq, L_ne, assign).tp != res.tp) {
             puts("type-error: !=");
             exit(-1);
         }
@@ -365,10 +397,10 @@ expr parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_
 }
 
 // &&
-expr parse_expr5(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
+expr parse_expr6(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne, bool assign) {
     script csrc = *src;
     bytecode ccode = *code;
-    expr res = parse_expr4(src, code, vars, sign, L_eq, L_ne);
+    expr res = parse_expr5(src, code, vars, sign, L_eq, L_ne, assign);
 
     if (src->p[0] == '&' && src->p[1] == '&') {
         if (res.op != CONDITON) {
@@ -378,12 +410,12 @@ expr parse_expr5(script* src, bytecode *code, variables* vars, bool sign, int32_
         }
         *src = csrc;
         reverse(code, ccode);
-        parse_expr4(src, code, vars, sign, L_eq, L_ne);
+        parse_expr5(src, code, vars, sign, L_eq, L_ne, assign);
 
         do {
             src->p += 2;
             skip(src);
-            if (parse_expr4(src, code, vars, sign, L_eq, L_ne).op != CONDITON) {
+            if (parse_expr5(src, code, vars, sign, L_eq, L_ne, assign).op != CONDITON) {
                 puts("type-error: && _");
                 exit(-1);
             }
@@ -398,7 +430,7 @@ expr parse_expr5(script* src, bytecode *code, variables* vars, bool sign, int32_
 expr parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne) {
     script csrc = *src;
     bytecode ccode = *code;
-    expr res = parse_expr5(src, code, vars, sign, L_eq, L_ne);
+    expr res = parse_expr6(src, code, vars, sign, L_eq, L_ne, 0);
 
     if (*src->p == '=') {
         if (res.op != MODIFIABLE) {
@@ -416,16 +448,15 @@ expr parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t
             puts("type-error: ");
             exit(-1);
         }
-        parse_expr5(&csrc, code, vars, sign, L_eq, L_ne);
+        parse_expr6(&csrc, code, vars, sign, L_eq, L_ne, 1);
 
-        return (expr){
-            .op = VALUE,
-            .tp = res.tp
-        };
+        return res;
     }
 
     return res;
 }
+
+
 
 void iputs(int64_t n) {
     printf("%ld\n", n);
