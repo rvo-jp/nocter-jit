@@ -1,1 +1,0 @@
-gcc src/main.c src/bytecode.c -o nocter

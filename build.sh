@@ -1,1 +1,0 @@
-gcc src-arm64/main.c src-arm64/bytecode.c -o nocter
