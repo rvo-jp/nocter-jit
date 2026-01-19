@@ -86,23 +86,6 @@ void setid(script* src, char* mem) {
 
 expr parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne);
 
-type parse_value(script* src, bytecode *code, variables* vars) {
-    script csrc = *src;
-    bytecode ccode = *code;
-    expr res = parse_expr(src, code, vars, 0, 0, 0);
-
-    if (res.op == CONDITON) {
-        int32_t L_eq = code->main.size;
-        int32_t L_ne = code->main.size + 4;
-
-        
-    }
-    else if (res.op == MODIFIABLE) {
-
-    }
-    else return res.tp;
-}
-
 // ()
 expr parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne, bool assign) {
     if (*src->p == '(') {
@@ -424,6 +407,24 @@ expr parse_expr6(script* src, bytecode *code, variables* vars, bool sign, int32_
     }
     
     return res;
+}
+
+
+type parse_value(script* src, bytecode *code, variables* vars) {
+    script csrc = *src;
+    bytecode ccode = *code;
+    expr res = parse_expr(src, code, vars, 0, 0, 0);
+
+    if (res.op == CONDITON) {
+        int32_t L_eq = code->main.size;
+        int32_t L_ne = code->main.size + 4;
+
+        
+    }
+    else if (res.op == MODIFIABLE) {
+
+    }
+    else return res.tp;
 }
 
 // =
