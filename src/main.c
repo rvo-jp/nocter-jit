@@ -30,7 +30,7 @@ typedef enum type {
 typedef struct expr {
     enum op {
         VALUE,
-        CONDITON,
+        COND,
         MODIFIABLE
     } op;
     type tp;
@@ -238,14 +238,14 @@ expr parse_expr2(script* src, bytecode *code, variables* vars, bool sign, int32_
         src->p += 1;
         skip(src);
 
-        if (parse_expr2(src, code, vars, sign, L_ne, L_eq, assign).op != CONDITON) {
+        if (parse_expr2(src, code, vars, sign, L_ne, L_eq, assign).op != COND) {
             error(src, 1);
             puts("type-error: COND");
             exit(-1);
         }
 
         return (expr){
-            .op = CONDITON,
+            .op = COND,
             .tp = BOOL
         };
     }
@@ -345,7 +345,7 @@ expr parse_expr5(script* src, bytecode *code, variables* vars, bool sign, int32_
 
         append(code, byte2, sizeof(byte2));
         res = (expr){
-            .op = CONDITON,
+            .op = COND,
             .tp = BOOL
         };
     }
@@ -372,7 +372,7 @@ expr parse_expr5(script* src, bytecode *code, variables* vars, bool sign, int32_
 
         append(code, byte2, sizeof(byte2));
         res = (expr){
-            .op = CONDITON,
+            .op = COND,
             .tp = BOOL
         };
     }
@@ -386,7 +386,7 @@ expr parse_expr6(script* src, bytecode *code, variables* vars, bool sign, int32_
     expr res = parse_expr5(src, code, vars, sign, L_eq, L_ne, assign);
 
     if (src->p[0] == '&' && src->p[1] == '&') {
-        if (res.op != CONDITON) {
+        if (res.op != COND) {
             error(src, 2);
             puts("type-error: _ &&");
             exit(-1);
@@ -398,7 +398,7 @@ expr parse_expr6(script* src, bytecode *code, variables* vars, bool sign, int32_
         do {
             src->p += 2;
             skip(src);
-            if (parse_expr5(src, code, vars, sign, L_eq, L_ne, assign).op != CONDITON) {
+            if (parse_expr5(src, code, vars, sign, L_eq, L_ne, assign).op != COND) {
                 puts("type-error: && _");
                 exit(-1);
             }
@@ -415,7 +415,7 @@ type parse_value(script* src, bytecode *code, variables* vars) {
     bytecode ccode = *code;
     expr res = parse_expr(src, code, vars, 0, 0, 0);
 
-    if (res.op == CONDITON) {
+    if (res.op == COND) {
         int32_t L_eq = code->main.size;
         int32_t L_ne = code->main.size + 4;
 
@@ -511,7 +511,7 @@ void parse_statement(script* src, bytecode *code, variables* vars) {
         char *cp = src->p;
         bytecode ccode = *code;
 
-        if (parse_expr(src, code, vars, true, 0, 0).op != CONDITON) {
+        if (parse_expr(src, code, vars, true, 0, 0).op != COND) {
             puts("type-error: CONDITION");
             exit(-1);
         }
@@ -566,7 +566,7 @@ void parse_statement(script* src, bytecode *code, variables* vars) {
         
         expr res = parse_expr(src, code, vars, 0, 0, 0);
 
-        if (res.op == CONDITON) {
+        if (res.op == COND) {
             int32_t L_end = code->main.size;
             src->p = cp;
             reverse(code, ccode);
