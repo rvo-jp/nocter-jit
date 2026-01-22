@@ -417,13 +417,23 @@ type parse_value(script* src, bytecode *code, variables* vars) {
 
     if (res.op == COND) {
         int32_t L_eq = code->main.size;
-        int32_t L_ne = code->main.size + 4;
+        int32_t L_ne = code->main.size + 6;
 
-        
-    }
-    else if (res.op == MODIFIABLE) {
+        *src = csrc;
+        reverse(code, ccode);
+        parse_expr(src, code, vars, 0, L_eq, L_ne);
 
+        uint8_t byte[] = {
+            0x31,0xC0,      // xor eax, eax
+            0xFF,0xC0       // inc eax
+            0xEB,0x02       // jmp +2
+            0x31,0xC0,      // xor eax, eax
+        };
+        append(code, byte, sizeof(byte));
+        return res.tp;
     }
+    // else if (res.op == MODIFIABLE) {
+    // }
     else return res.tp;
 }
 
@@ -444,7 +454,7 @@ expr parse_expr(script* src, bytecode *code, variables* vars, bool sign, int32_t
         reverse(code, ccode);
         src->p += 1;
         skip(src);
-        if (parse_expr(src, code, vars, sign, L_eq, L_ne).tp != res.tp) {
+        if (parse_value(src, code, vars) != res.tp) {
             error(&rsrc, 1);
             puts("type-error: ");
             exit(-1);
@@ -587,7 +597,7 @@ void parse_statement_single(script* src, bytecode *code, variables* vars) {
         }
         variable var;
         setid(src->p, var.id);
-        var.type = parse_expr(src, code, vars, 0, 0, 0).tp; // right hand value
+        var.type = parse_value(src, code, vars); // right hand value
 
         // resister
         int i = vars->size;
