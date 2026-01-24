@@ -155,7 +155,8 @@ expr parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_
         skip(src);
 
         uint8_t byte[] = {
-            0x48, 0x83, 0xC8, 0xFF   // or rax, -1
+            0x31,0xC0,      // xor eax, eax
+            0xFF,0xC0       // inc eax
         };
         append(code, byte, sizeof(byte));
     }
@@ -164,7 +165,7 @@ expr parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_
         skip(src);
 
         uint8_t byte[] = {
-            0x48, 0x31, 0xC0   // xor rax, rax
+            0x31,0xC0       // xor eax, eax
         };
         append(code, byte, sizeof(byte));
     }
@@ -425,9 +426,9 @@ type parse_value(script* src, bytecode *code, variables* vars) {
 
         uint8_t byte[] = {
             0x31,0xC0,      // xor eax, eax
-            0xFF,0xC0       // inc eax
-            0xEB,0x02       // jmp +2
-            0x31,0xC0,      // xor eax, eax
+            0xFF,0xC0,      // inc eax
+            0xEB,0x02,      // jmp +2
+            0x31,0xC0       // xor eax, eax
         };
         append(code, byte, sizeof(byte));
         return res.tp;
