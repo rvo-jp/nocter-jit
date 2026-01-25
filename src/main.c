@@ -24,16 +24,25 @@
 typedef enum type {
     STRING,
     INTEGER,
-    BOOL
+    BOOL,
+    FLAOT
 } type;
 
 typedef struct expr {
     enum op {
+        IMM, // 即値（コンパイル時に確定している定数）
+        /**
+         * 複雑な値
+         * - 式の評価結果
+         * - 関数呼び出し結果
+         * - メモリロードが必要な値
+         */
         VALUE,
-        COND,
-        MODIFIABLE
+        COND, // 真偽値
+        MODIFIABLE // 変数
     } op;
     type tp;
+    uint64_t dat;
 } expr;
 
 
@@ -211,20 +220,49 @@ expr parse_expr1(script* src, bytecode *code, variables* vars, bool sign, int32_
         int64_t n = 0;
         do n = n * 10 + (*src->p ++) - '0';
         while (NUM(*src->p));
-        skip(src);
 
-        uint8_t byte[] = {
-            0x48, 0xB8, 0,0,0,0,0,0,0,0   // mov rax, imm64
-        };
-        *(int64_t*)(byte + 2) = n;
+        if (*src->p == '.' && NUM(src->p[1])) { // double
+            src->p ++;
 
-        // printf("@n: %ld\n", n);
-        append(code, byte, sizeof(byte));
+            double d = n;
+            double u = 0.1;
 
-        return (expr){
-            .op = VALUE,
-            .tp = INTEGER
-        };
+            do {
+                d += u * ((*src->p ++) - '0');
+                u *= 0.1;
+            }
+            while (NUM(*src->p));
+            skip(src);
+
+            uint8_t byte[] = {
+                0x48, 0xB8, 0,0,0,0,0,0,0,0   // mov rax, imm64
+            };
+            uint64_t bits;
+            memcpy(&bits, &d, sizeof(bits));
+            *(uint64_t*)(byte + 2) = bits;
+            append(code, byte, sizeof(byte));
+
+            return (expr){
+                .op = VALUE,
+                .tp = FLAOT
+            };
+        }
+        else { // long
+            skip(src);
+
+            uint8_t byte[] = {
+                0x48, 0xB8, 0,0,0,0,0,0,0,0   // mov rax, imm64
+            };
+            *(uint64_t*)(byte + 2) = n;
+
+            // printf("@n: %ld\n", n);
+            append(code, byte, sizeof(byte));
+
+            return (expr){
+                .op = VALUE,
+                .tp = INTEGER
+            };
+        }
     }
     else {
         error(src, 1);
@@ -288,10 +326,18 @@ expr parse_expr3(script* src, bytecode *code, variables* vars, bool sign, int32_
 
 // +
 expr parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_t L_eq, int32_t L_ne, bool assign) {
-    expr res = parse_expr3(src, code, vars, sign, L_eq, L_ne, assign);
+    expr left = parse_expr3(src, code, vars, sign, L_eq, L_ne, assign);
 
     for (;;)
     if (*src->p == '+') {
+        src->p ++;
+        skip(src);
+        expr right = parse_expr3(src, code, vars, sign, L_eq, L_ne, assign);
+
+        if (left.op == IMM && left.op == IMM) {
+
+        }
+
         if (res.tp != INTEGER) {
             puts("type-error: INT");
             exit(-1);
