@@ -42,7 +42,7 @@ typedef struct expr {
         MODIFIABLE // 変数
     } op;
     type tp;
-    uint64_t dat;
+    bytec bits;
 } expr;
 
 
@@ -334,34 +334,53 @@ expr parse_expr4(script* src, bytecode *code, variables* vars, bool sign, int32_
         skip(src);
         expr right = parse_expr3(src, code, vars, sign, L_eq, L_ne, assign);
 
+        /**
+         * 即値同士の演算
+         * コンパイル時に畳み込む
+         * 1 + 2 -> 3
+         */
         if (left.op == IMM && left.op == IMM) {
+            uint64_t n;
 
+            if (left.tp == INTEGER && right.tp == INTEGER) {
+                n = *(int64_t *)left.bits.mem + *(int64_t *)right.bits.mem;
+            }
+
+            return (expr){
+                .bits = n,
+                .op = IMM,
+                .tp = INTEGER
+            };
         }
+        else 
 
-        if (res.tp != INTEGER) {
-            puts("type-error: INT");
-            exit(-1);
-        }
 
-        uint8_t byte1[] = {
-            0x50    // push rax
-        };
-        append(code, byte1, sizeof(byte1));
 
-        src->p ++;
-        skip(src);
-        if (parse_expr3(src, code, vars, sign, L_eq, L_ne, assign).tp != INTEGER) {
-            puts("type-error: INT");
-            exit(-1);
-        }
 
-        uint8_t byte2[] = {
-            0x59,               // pop rcx
-            0x48, 0x01, 0xC8    // add rax, rcx
-        };
-        append(code, byte2, sizeof(byte2));
+        // if (res.tp != INTEGER) {
+        //     puts("type-error: INT");
+        //     exit(-1);
+        // }
+
+        // uint8_t byte1[] = {
+        //     0x50    // push rax
+        // };
+        // append(code, byte1, sizeof(byte1));
+
+        // src->p ++;
+        // skip(src);
+        // if (parse_expr3(src, code, vars, sign, L_eq, L_ne, assign).tp != INTEGER) {
+        //     puts("type-error: INT");
+        //     exit(-1);
+        // }
+
+        // uint8_t byte2[] = {
+        //     0x59,               // pop rcx
+        //     0x48, 0x01, 0xC8    // add rax, rcx
+        // };
+        // append(code, byte2, sizeof(byte2));
     }
-    else return res;
+    else return left;
 }
 
 // == !=
