@@ -1,13 +1,18 @@
 #pragma once
 #include <vector>
 #include "script.hpp"
-#include "variable.hpp"
 #include "bytes.hpp"
-using namespace std;
 
 #define ID(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') 
 #define NUM(c) (c >= '0' && c <= '9')
 #define EOI(c) (!ID(c) && !NUM(c))
+
+enum type {
+    STRING,
+    INTEGER,
+    BOOL,
+    FLAOT
+};
 
 struct Expr {
     enum option {
@@ -26,9 +31,14 @@ struct Expr {
     Bytes bytes;
 };
 
+struct Variable {
+    char id[64];
+    type t;
+};
+
 class Parser {
 private:
-    vector<Variable> vars;
+    std::vector<Variable> vars;
 
     // ()
     Expr expr1(Script& src);

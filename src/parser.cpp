@@ -23,9 +23,11 @@ Expr Parser::expr1(Script& src) {
         size_t i = vars.size() - 1;
         do {
             if (strcmp(vars[i].id, id) == 0) {
-                Expr expr(Expr::MODIFIABLE, vars[i].t, {});
-                expr.u32(-((i+1) * 8));
-                return expr;
+                return Expr{
+                    .opt = Expr::MODIFIABLE,
+                    .t = vars[i].t,
+                    .bytes = Bytes::emit<int32_t>(-((i+1) * 8))
+                };
             }
         }
         while (i--);
@@ -35,3 +37,4 @@ Expr Parser::expr1(Script& src) {
         exit(-1);
     }
 }
+

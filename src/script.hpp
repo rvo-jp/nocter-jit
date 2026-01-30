@@ -1,5 +1,4 @@
 #pragma once
-using namespace std;
 
 class Script {
 private:
@@ -7,8 +6,7 @@ private:
     const char *file;
 public:
     char *p;
-    void skip();
-    void Script::error(int len);
-    Script::Script(const char* abs_path);
+    void error(int len);
+    Script(const char* abs_path);
     ~Script();
 };
