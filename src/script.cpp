@@ -17,6 +17,7 @@ Script::Script(const char* abs_path) {
     fread(p, 1, flen, fp);
     p[flen] = '\0';
     fclose(fp);
+    file = abs_path;
 }
 
 Script::~Script() {

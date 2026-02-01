@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <string>
 #include "script.hpp"
 #include "bytes.hpp"
 
@@ -7,7 +8,7 @@
 #define NUM(c) (c >= '0' && c <= '9')
 #define EOI(c) (!ID(c) && !NUM(c))
 
-enum type {
+enum Type {
     STRING,
     INTEGER,
     BOOL,
@@ -27,19 +28,32 @@ struct Expr {
          */
         VAL
     } opt;
-    type t;
+    Type type;
     Bytes bytes;
-};
-
-struct Variable {
-    char id[64];
-    type t;
 };
 
 class Parser {
 private:
+    struct Variable {
+        const std::string id;
+        Type type;
+    };
     std::vector<Variable> vars;
+    
+    std::vector<std::string> includes;
 
     // ()
     Expr expr1(Script& src);
+
+    // !
+    Expr expr2(Script& src);
+
+    // if
+    Bytes statement(Script& src);
+
+    // let include
+    Bytes declare(Script& src);
 };
+
+
+
