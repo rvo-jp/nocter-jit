@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <string>
+#include <unordered_set>
 #include "script.hpp"
 #include "bytes.hpp"
 
@@ -10,7 +11,7 @@
 
 enum Type {
     STRING,
-    INTEGER,
+    INTEGRAL,
     BOOL,
     FLAOT
 };
@@ -39,8 +40,8 @@ private:
         Type type;
     };
     std::vector<Variable> vars;
-    
-    std::vector<std::string> includes;
+
+    std::unordered_set<std::string> included_files;
 
     // ()
     Expr expr1(Script& src);

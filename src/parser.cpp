@@ -1,4 +1,5 @@
 #include "parser.hpp"
+#include <filesystem>
 
 static void skip(Script& src) {
     while (*src.p == ' ' || *src.p == '\r' || *src.p == '\n') src.p ++;
@@ -65,7 +66,30 @@ Bytes Parser::declare(Script& src) {
         skip(src);
 
         Script csrc = src;
-        while (*src.p != ' ' || *src.p != '\r' || *src.p != '\n') *src.p ++;
+        while (*src.p != ' ' || *src.p != '\r' || *src.p != '\n' || *src.p != '\0') *src.p ++;
+
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::path resolved = fs::weakly_canonical(
+            fs::path(src.fullpath).parent_path() / std::string(csrc.p, src.p - csrc.p),
+            ec
+        );
+        if (ec || !fs::exists(resolved) || !fs::is_regular_file(resolved)) {
+            csrc.error(src.p - csrc.p);
+            puts("error: file not found");
+            exit(-1);
+        }
+        const std::string fullpath = resolved.string();
+
+        if (!included_files.insert(fullpath).second) {
+            // すでにinclude済み
+            return Bytes{};
+        }
+
+        Script includeed_src(fullpath);
+        Bytes code;
+        while (includeed_src.p != '\0') code += declare(includeed_src);
+        return code;
     }
     else return statement(src);
 }

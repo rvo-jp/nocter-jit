@@ -1,14 +1,14 @@
 #pragma once
+#include <string>
 
 class Script {
 public:
-    Script(const char* abs_path);
-    ~Script();
+    Script::Script(const std::string& fullpath);
     char *p;
+    std::string& fullpath;
 
     void error(int len);
 
 private:
     char *mem;
-    const char *file;
 };

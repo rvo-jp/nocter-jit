@@ -2,8 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-Script::Script(const char* abs_path) {
-    FILE* fp = fopen(abs_path, "rb");
+Script::Script(const std::string& fullpath) {
+    this->fullpath = fullpath;
+
+    FILE* fp = fopen(fullpath.c_str(), "rb");
     if (!fp) {
         puts("error: file not found");
         exit(-1);
@@ -17,7 +19,6 @@ Script::Script(const char* abs_path) {
     fread(p, 1, flen, fp);
     p[flen] = '\0';
     fclose(fp);
-    file = abs_path;
 }
 
 Script::~Script() {
@@ -46,7 +47,8 @@ void Script::error(int len) {
         col --;
     }
 
-    while (*p != '\r' && *p != '\n') putc(*p, stdout);
+    while (*p != '\r' && *p != '\n' && *p != '\0') putc(*p, stdout);
+    putc('\n', stdout);
 
     while (col > 0) {
         col --;
