@@ -1,8 +1,8 @@
-#include "script.hpp"
+#include "parser.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 
-Script::Script(const std::string& fullpath) {
+Parser::Script::Script(const std::string& fullpath) {
     this->fullpath = fullpath;
 
     FILE* fp = fopen(fullpath.c_str(), "rb");
@@ -21,17 +21,17 @@ Script::Script(const std::string& fullpath) {
     fclose(fp);
 }
 
-Script::~Script() {
+Parser::Script::~Script() {
     free(mem);
 }
 
-void Script::error(int len) {
+void Parser::Script::error(int len) {
     
     int line = 0;
     for (char *s = p; s != mem; s --) {
         if (*s == '\n') line ++;
     }
-    printf("%s, line %d:\n", file, line);
+    printf("%s, line %d:\n", fullpath, line);
 
 
     int col = 0;
@@ -58,4 +58,17 @@ void Script::error(int len) {
         len --;
         putc('^', stdout);
     }
+}
+
+void Parser::Script::skip() {
+    while (*p == ' ' || *p == '\r' || *p == '\n') p ++;
+}
+
+std::string Parser::Script::getid() {
+    const char *str = p;
+    do *p++;
+    while (ID(*p) || NUM(*p));
+    std::string id(str, p - str); 
+    skip();
+    return id;
 }

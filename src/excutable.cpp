@@ -1,4 +1,4 @@
-#include "jit.hpp"
+#include "excutable.hpp"
 #ifdef _WIN32
     #include <windows.h>
 #else
@@ -6,7 +6,7 @@
     #include <unistd.h>
 #endif
 
-Jit::Jit(std::vector<uint8_t> bytes) {
+Excutable::Excutable(std::vector<uint8_t> bytes) {
 #ifdef _WIN32
     mem = VirtualAlloc(
         nullptr, bytes.size(),
@@ -32,7 +32,7 @@ Jit::Jit(std::vector<uint8_t> bytes) {
 #endif
 }
 
-Jit::~Jit() {
+Excutable::~Excutable() {
 #ifdef _WIN32
     VirtualFree(mem, 0, MEM_RELEASE);
 #else
@@ -40,6 +40,6 @@ Jit::~Jit() {
 #endif
 }
 
-void Jit::execute() {
+void Excutable::run() {
     ((void (*)())mem)();
 }

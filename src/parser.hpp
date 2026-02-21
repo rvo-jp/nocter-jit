@@ -1,8 +1,8 @@
 #pragma once
 #include <vector>
+#include <variant>
 #include <string>
 #include <unordered_set>
-#include "script.hpp"
 #include "bytes.hpp"
 
 #define ID(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') 
@@ -11,7 +11,7 @@
 
 enum Type {
     STRING,
-    INTEGRAL,
+    INTEGER,
     BOOL,
     FLAOT
 };
@@ -30,31 +30,90 @@ struct Expr {
         VAL
     } opt;
     Type type;
-    Bytes bytes;
+
+    std::variant<int64_t, double, Bytes> data;
+
+    int64_t as_int() const {
+        return std::get<int64_t>(data);
+    }
 };
+
+
+
+
 
 class Parser {
-private:
-    struct Variable {
-        const std::string id;
-        Type type;
-    };
-    std::vector<Variable> vars;
+public:
+    static Bytes parse();
 
-    std::unordered_set<std::string> included_files;
+private:
+    class Script {
+    public:
+        Script(const std::string& fullpath);
+        char *p;
+        std::string& fullpath;
+
+        // エラー吐く
+        void error(int len);
+
+        // 空白スキップ
+        void skip();
+
+        // 識別子取得（+移動）
+        std::string getid();
+    private:
+        // ファイルの中身の実態（アロケート）
+        char *mem;
+    };
+
+    class Local {
+    public:
+        // 変数
+        struct Variable {
+            const std::string id;
+            Type type;
+        };
+
+        // 変数リスト
+        std::vector<Variable> vars;
+
+        // 変数が同時に生存する最大数
+        int maxVars;
+    };
 
     // ()
-    Expr expr1(Script& src);
-
-    // !
-    Expr expr2(Script& src);
+    Expr expr1(Script& src, Local& local);
 
     // if
-    Bytes statement(Script& src);
+    Bytes statement(Script& src, Local& local);
 
-    // let include
-    Bytes declare(Script& src);
+    // let
+    Bytes declare(Script& src, Local& local);
+
+
+    // 静的データ
+    struct DB {
+        std::string id;
+        Type type;
+        Bytes bytes;
+    };
+    // 静的データリスト
+    std::vector<DB> db;
+
+    /**
+     * include func class
+     * 静的データリストに保存
+     */
+    void global(Script& src);
+
+    /**
+     * ソースファイルをパースする
+     * @param fullpath フルパス文字列
+     * @return バイト列 / インクルード済みの場合空バイト列を返す
+     */
+    void parseFile(const std::string& fullpath);
+
+    // インクルード済みのファイルのフルパス文字列リスト（2重インクルード防止）
+    std::unordered_set<std::string> included_files;
 };
-
-
 

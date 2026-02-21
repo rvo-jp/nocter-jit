@@ -3,6 +3,7 @@
 #include <initializer_list>
 #include <cstring>
 #include <type_traits>
+#include "excutable.hpp"
 
 class Bytes {
 public:
@@ -29,7 +30,18 @@ public:
     friend Bytes operator+(Bytes lhs, const Bytes& rhs);
     friend Bytes operator+(Bytes lhs, std::initializer_list<uint8_t> rhs);
 
+    // 静的データ登録
+    void reg(int pos, const size_t index);
+
+    Excutable generate();
+
 private:
     std::vector<uint8_t> bytes;
+
+    struct Relpos {
+        int pos; // このbytesの位置
+        const size_t index; // 特定のBytesのDB内でのindex
+    };
+    std::vector<Relpos> rp;
 };
 

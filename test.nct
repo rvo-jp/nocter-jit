@@ -6,3 +6,12 @@ else {
     puts "no"
 }
 
+
+include std/io.nct
+include path/to/file.nct
+
+func main() {
+    print("Hello, world!")
+}
+
+

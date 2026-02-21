@@ -16,3 +16,7 @@ Bytes operator+(Bytes lhs, std::initializer_list<uint8_t> rhs) {
     lhs += Bytes(rhs);
     return lhs;
 }
+
+void Bytes::reg(int pos, const size_t index) {
+    rp.emplace_back(pos, index);
+}
