@@ -1,10 +1,9 @@
 #include "parser.hpp"
 #include <stdio.h>
 #include <stdlib.h>
+#include <iostream>
 
-Parser::Script::Script(const std::string& fullpath) {
-    this->fullpath = fullpath;
-
+Parser::Script::Script(const std::string& fullpath_) : fullpath(fullpath_) {
     FILE* fp = fopen(fullpath.c_str(), "rb");
     if (!fp) {
         puts("error: file not found");
@@ -25,14 +24,13 @@ Parser::Script::~Script() {
     free(mem);
 }
 
-void Parser::Script::error(int len) {
+void Parser::Script::error(int len, const std::string& msg, int exc) {
     
     int line = 0;
     for (char *s = p; s != mem; s --) {
         if (*s == '\n') line ++;
     }
-    printf("%s, line %d:\n", fullpath, line);
-
+    std::cout << fullpath << ", line " << line << ":\n";
 
     int col = 0;
 
@@ -58,9 +56,14 @@ void Parser::Script::error(int len) {
         len --;
         putc('^', stdout);
     }
+
+    std::cout << "\n" << msg << "\n";
+
+    if (exc != 0) exit(exc);
 }
 
-void Parser::Script::skip() {
+void Parser::Script::skip(int len) {
+    p += len;
     while (*p == ' ' || *p == '\r' || *p == '\n') p ++;
 }
 
@@ -69,6 +72,6 @@ std::string Parser::Script::getid() {
     do *p++;
     while (ID(*p) || NUM(*p));
     std::string id(str, p - str); 
-    skip();
+    skip(0);
     return id;
 }

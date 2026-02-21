@@ -1,16 +1,13 @@
-
-if 2 != 1 && 2 == 2 {
-    puts "yes"
-}
-else {
-    puts "no"
-}
-
-
-include std/io.nct
-include path/to/file.nct
+import std/io.nct
+import path/to/file.nct
 
 func main() {
+    if 2 != 1 && 2 == 2 {
+        puts "yes"
+    }
+    else {
+        puts "no"
+    }
     print("Hello, world!")
 }
 

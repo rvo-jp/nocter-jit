@@ -44,20 +44,22 @@ struct Expr {
 
 class Parser {
 public:
-    static Bytes parse();
+    static Bytes parse(const std::string& path);
 
 private:
+    Parser() = default;
+
     class Script {
     public:
-        Script(const std::string& fullpath);
+        Script(const std::string& fullpath_);
         char *p;
-        std::string& fullpath;
+        const std::string fullpath;
 
         // エラー吐く
-        void error(int len);
+        void error(int len, const std::string& msg, int exc);
 
         // 空白スキップ
-        void skip();
+        void skip(int len);
 
         // 識別子取得（+移動）
         std::string getid();

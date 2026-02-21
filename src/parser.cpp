@@ -15,11 +15,11 @@ Expr Parser::expr1(Script& src, Local& local) {
         str ++; // 先頭の「"」を飛ばす 
 
         Bytes bytes = {0,0,0,0};
-        db.emplace_back("", STRING, Bytes{})
-        bytes.reg(0, std::vector<uint8_t>(str, src.p));
+        db.emplace_back("", STRING, Bytes{}std::vector<uint8_t>(str, src.p));
+        bytes.reg(0, db.size() - 1);
         
         src.p ++; // 終端の「"」を飛ばす 
-        src.skip();
+        src.skip(0);
 
         return Expr{
             .opt = Expr::IMM,
@@ -43,9 +43,7 @@ Expr Parser::expr1(Script& src, Local& local) {
         }
         while (i--);
 
-        csrc.error(1);
-        printf("error: undefined variable '%s'\n", id);
-        exit(-1);
+        csrc.error(1, "error: undefined variable '" + id + "'", -1);
     }
     else if (NUM(*src.p)) {
         int64_t n = 0;
@@ -64,7 +62,7 @@ Expr Parser::expr1(Script& src, Local& local) {
                 u *= 0.1;
             }
             while (NUM(*src.p));
-            src.skip();
+            src.skip(0);
 
             return Expr{
                 .opt = Expr::IMM,
@@ -75,7 +73,7 @@ Expr Parser::expr1(Script& src, Local& local) {
         
         // long
         else {
-            src.skip();
+            src.skip(0);
             return Expr{
                 .opt = Expr::IMM,
                 .type = INTEGER,
@@ -84,21 +82,21 @@ Expr Parser::expr1(Script& src, Local& local) {
         }
     }
     else {
-        src.error(1);
-        puts("error: invalid value");
-        exit(-1);
+        src.error(1, "error: invalid value", -1);
     }
+}
+
+Bytes Parser::statement(Script& src, Local& local) {
+    
 }
 
 Bytes Parser::declare(Script& src, Local& local) {
     if (src.p[0] == 'l' && src.p[1] == 'e' && src.p[2] == 't' && EOI(src.p[3])) {
-        src.p += 3;
-        src.skip();
+        src.skip(3);
 
         // id
         if (!ID(*src.p)) {
-            puts("error: not id");
-            exit(-1);
+            src.error(1, "error: not id", -1);
         }
         auto id = src.getid();
         auto expr = expr1(src, local); // right hand value
@@ -117,61 +115,40 @@ Bytes Parser::declare(Script& src, Local& local) {
 
 
 
-
+namespace fs = std::filesystem;
 
 void Parser::global(Script& src) {
     // include
     if (src.p[0] == 'i' && src.p[1] == 'n' && src.p[2] == 'c' && src.p[3] == 'l' && src.p[4] == 'u' && src.p[5] == 'd' && src.p[6] == 'e' && EOI(src.p[7])) {
-        src.p += 6;
-        src.skip();
+        src.skip(6);
 
         Script csrc = src;
         while (*src.p != ' ' || *src.p != '\r' || *src.p != '\n' || *src.p != '\0') *src.p ++;
 
-        namespace fs = std::filesystem;
-        std::error_code ec;
-        fs::path resolved = fs::weakly_canonical(
-            fs::path(src.fullpath).parent_path() / std::string(csrc.p, src.p - csrc.p),
-            ec
-        );
-        src.skip();
+        fs::path canon = fs::weakly_canonical(fs::path(src.fullpath).parent_path() / std::string(csrc.p, src.p - csrc.p));
+        src.skip(0);
         
-        if (ec || !fs::exists(resolved) || !fs::is_regular_file(resolved)) {
-            csrc.error(src.p - csrc.p);
-            puts("error: file not found");
-            exit(-1);
+        if (!fs::exists(canon) || !fs::is_regular_file(canon)) {
+            csrc.error(src.p - csrc.p, "error: file not found", -1);
         }
 
-        return parseFile(resolved.string());
+        return parseFile(canon.string());
     }
     
     // func
     else if (src.p[0] == 'f' && src.p[1] == 'u' && src.p[2] == 'n' && src.p[3] == 'c' && EOI(src.p[4])) {
-        src.p += 4;
-        src.skip();
+        src.skip(4);
 
         std::string id = src.getid();
 
         if (*src.p != '{') {
-            src.error(1);
-            puts("error: expected '{'");
-            exit(-1);
+            src.error(1, "error: expected '{'", -1);
         }
         src.p++;
 
         Local local;
         Bytes bytes;
-        bytes += { // prologue
-            0x55,                       // push rbp
-            0x48, 0x89, 0xE5,           // mov rbp, rsp
-            0x48, 0x81, 0xEC, 0,0,0,0   // sub rsp, imm32(frame_size後入れ)
-        };
         while (*src.p != '}') bytes += declare(src, local);
-        bytes += { // epilogue
-            0x48, 0x89, 0xEC,   // mov rsp, rbp
-            0x5D,               // pop rbp
-            0xC3                // ret
-        };
 
         // 変数の最大数を表示
         printf("@maxVars: %zu\n", local.maxVars);
@@ -179,15 +156,22 @@ void Parser::global(Script& src) {
         // フレームサイズ
         int frame_size = 32 + local.maxVars * 8;
         frame_size = (frame_size + 15) & ~15;  // 16バイト境界に丸める
-        *(int32_t*)(code.main.mem + 7) = frame_size; // 埋め込み
+
+        bytes = Bytes{ // prologue
+            0x55,               // push rbp
+            0x48, 0x89, 0xE5,   // mov rbp, rsp
+            0x48, 0x81, 0xEC    // sub rsp, imm32(frame_size後入れ)
+        } + Bytes::emit(frame_size) + bytes + Bytes{ // epilogue
+            0x48, 0x89, 0xEC,   // mov rsp, rbp
+            0x5D,               // pop rbp
+            0xC3                // ret
+        };
 
         db.emplace_back(id, INTEGER, std::move(bytes));
     }
 
     else {
-        src.error(1);
-        puts("error: ");
-        exit(-1);
+        src.error(1, "error: ", -1);
     }
 }
 
@@ -199,4 +183,21 @@ void Parser::parseFile(const std::string& fullpath) {
 
     Script src(fullpath);
     while (*src.p != '\0') global(src);
+}
+
+
+
+Bytes Parser::parse(const std::string& path) {
+
+    fs::path canon = fs::weakly_canonical(fs::absolute(path));
+    
+    if (!fs::exists(canon) || !fs::is_regular_file(canon)) {
+        puts("error: file not found");
+        exit(-1);
+    }
+
+    Parser parser;
+    parser.parseFile(canon);
+
+
 }
