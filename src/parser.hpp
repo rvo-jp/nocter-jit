@@ -3,7 +3,10 @@
 #include <variant>
 #include <string>
 #include <unordered_set>
-#include "bytes.hpp"
+#include <initializer_list>
+#include <cstring>
+#include <type_traits>
+#include "excutable.hpp"
 
 #define ID(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') 
 #define NUM(c) (c >= '0' && c <= '9')
@@ -13,38 +16,13 @@ enum Type {
     STRING,
     INTEGER,
     BOOL,
-    FLAOT
+    FLAOT,
+    FUNCTION
 };
-
-struct Expr {
-    enum option {
-        IMM, // 即値（コンパイル時に確定してる定数）
-        COND, // 真偽値
-        MODIFIABLE, // 変数
-        /**
-         * その他の値
-         * - 式の評価結果
-         * - 関数呼び出し結果
-         * - メモリロードが必要な値
-         */
-        VAL
-    } opt;
-    Type type;
-
-    std::variant<int64_t, double, Bytes> data;
-
-    int64_t as_int() const {
-        return std::get<int64_t>(data);
-    }
-};
-
-
-
-
 
 class Parser {
 public:
-    static Bytes parse(const std::string& path);
+    static std::vector<uint8_t> parse(const std::string& path);
 
 private:
     Parser() = default;
@@ -83,15 +61,40 @@ private:
         int maxVars;
     };
 
-    // ()
-    Expr expr1(Script& src, Local& local);
+    class Bytes {
+    public:
+        Bytes() = default;
 
-    // if
-    Bytes statement(Script& src, Local& local);
+        // 生バイト列用
+        Bytes(std::initializer_list<uint8_t> init);
 
-    // let
-    Bytes declare(Script& src, Local& local);
+        // 数値エンコード用
+        template <typename T>
+        static Bytes emit(T value) {
+            static_assert(
+                std::is_integral_v<T> || std::is_floating_point_v<T>,
+                "Bytes::emit<T> requires integral or floating-point type"
+            );
 
+            Bytes b;
+            b.bytes.resize(sizeof(T));
+            std::memcpy(b.bytes.data(), &value, sizeof(T));
+            return b;
+        }
+
+        // vector用
+        static Bytes emit(const std::vector<uint8_t>& vec);
+
+        Bytes& append(const Bytes& other);
+
+        std::vector<uint8_t> bytes;
+
+        struct Relpos {
+            int pos; // このbytes上での展開予定の位置
+            const size_t index; // 特定のBytesのDB内でのindex
+        };
+        std::vector<Relpos> rp;
+    };
 
     // 静的データ
     struct DB {
@@ -101,6 +104,40 @@ private:
     };
     // 静的データリスト
     std::vector<DB> db;
+
+
+
+    struct Expr {
+        enum option {
+            IMM, // 即値（コンパイル時に確定してる定数）
+            COND, // 真偽値
+            MODIFIABLE, // 変数
+            /**
+             * その他の値
+             * - 式の評価結果
+             * - 関数呼び出し結果
+             * - メモリロードが必要な値
+             */
+            VAL
+        } opt;
+        Type type;
+
+        std::variant<int64_t, double, Bytes> data;
+
+        int64_t as_int() const {
+            return std::get<int64_t>(data);
+        }
+    };
+
+    // ()
+    Expr expr1(Script& src, Local& local);
+
+    // if
+    Bytes statement(Script& src, Local& local);
+
+    // let
+    Bytes declare(Script& src, Local& local);
+
 
     /**
      * include func class

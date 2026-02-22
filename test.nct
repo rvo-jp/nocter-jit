@@ -1,7 +1,9 @@
 import std/io.nct
 import path/to/file.nct
 
-func main() {
+var num = 0
+
+func main {
     if 2 != 1 && 2 == 2 {
         puts "yes"
     }
@@ -11,4 +13,10 @@ func main() {
     print("Hello, world!")
 }
 
+class ABC {
+    func method() {
 
+    }
+
+    private static var member = 1
+}

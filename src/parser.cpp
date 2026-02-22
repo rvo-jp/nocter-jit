@@ -2,7 +2,7 @@
 #include <filesystem>
 
 // ()
-Expr Parser::expr1(Script& src, Local& local) {
+Parser::Expr Parser::expr1(Script& src, Local& local) {
     if (*src.p == '"' || *src.p == '\'') {
         char* str = src.p;
         do {
@@ -14,10 +14,14 @@ Expr Parser::expr1(Script& src, Local& local) {
         while (*str != *src.p);
         str ++; // 先頭の「"」を飛ばす 
 
+        std::vector<uint8_t> string(str, src.p);
+        string.push_back(0);
+
+        db.emplace_back("", STRING, Bytes::emit(string));
+
         Bytes bytes = {0,0,0,0};
-        db.emplace_back("", STRING, Bytes{}std::vector<uint8_t>(str, src.p));
-        bytes.reg(0, db.size() - 1);
-        
+        bytes.rp.emplace_back(0, db.size() - 1);
+
         src.p ++; // 終端の「"」を飛ばす 
         src.skip(0);
 
@@ -86,11 +90,11 @@ Expr Parser::expr1(Script& src, Local& local) {
     }
 }
 
-Bytes Parser::statement(Script& src, Local& local) {
-    
+Parser::Bytes Parser::statement(Script& src, Local& local) {
+
 }
 
-Bytes Parser::declare(Script& src, Local& local) {
+Parser::Bytes Parser::declare(Script& src, Local& local) {
     if (src.p[0] == 'l' && src.p[1] == 'e' && src.p[2] == 't' && EOI(src.p[3])) {
         src.skip(3);
 
@@ -107,7 +111,7 @@ Bytes Parser::declare(Script& src, Local& local) {
         if (local.maxVars < local.vars.size()) local.maxVars = local.vars.size();
 
         // mov [rbp - disp32], rax
-        return Bytes{0x48, 0x89, 0x85} + Bytes::emit<int32_t>(-(8 * local.vars.size()));
+        return Bytes{0x48, 0x89, 0x85}.append(Bytes::emit<int32_t>(-(8 * local.vars.size())));
     }
     else return statement(src, local);
 }
@@ -148,7 +152,7 @@ void Parser::global(Script& src) {
 
         Local local;
         Bytes bytes;
-        while (*src.p != '}') bytes += declare(src, local);
+        while (*src.p != '}') bytes.append(declare(src, local));
 
         // 変数の最大数を表示
         printf("@maxVars: %zu\n", local.maxVars);
@@ -157,17 +161,20 @@ void Parser::global(Script& src) {
         int frame_size = 32 + local.maxVars * 8;
         frame_size = (frame_size + 15) & ~15;  // 16バイト境界に丸める
 
-        bytes = Bytes{ // prologue
-            0x55,               // push rbp
-            0x48, 0x89, 0xE5,   // mov rbp, rsp
-            0x48, 0x81, 0xEC    // sub rsp, imm32(frame_size後入れ)
-        } + Bytes::emit(frame_size) + bytes + Bytes{ // epilogue
-            0x48, 0x89, 0xEC,   // mov rsp, rbp
-            0x5D,               // pop rbp
-            0xC3                // ret
-        };
-
-        db.emplace_back(id, INTEGER, std::move(bytes));
+        db.emplace_back(id, FUNCTION, std::move(
+            Bytes{                  // prologue
+                0x55,               // push rbp
+                0x48, 0x89, 0xE5,   // mov rbp, rsp
+                0x48, 0x81, 0xEC    // sub rsp, imm32(frame_size後入れ)
+            }
+            .append(Bytes::emit(frame_size))
+            .append(bytes)
+            .append(Bytes{          // epilogue
+                0x48, 0x89, 0xEC,   // mov rsp, rbp
+                0x5D,               // pop rbp
+                0xC3                // ret
+            })
+        ));
     }
 
     else {
@@ -187,7 +194,7 @@ void Parser::parseFile(const std::string& fullpath) {
 
 
 
-Bytes Parser::parse(const std::string& path) {
+std::vector<uint8_t> Parser::parse(const std::string& path) {
 
     fs::path canon = fs::weakly_canonical(fs::absolute(path));
     
