@@ -138,7 +138,7 @@ void Parser::global(Script& src) {
 
         return parseFile(canon.string());
     }
-    
+
     // func
     else if (src.p[0] == 'f' && src.p[1] == 'u' && src.p[2] == 'n' && src.p[3] == 'c' && EOI(src.p[4])) {
         src.skip(4);
@@ -193,18 +193,19 @@ void Parser::parseFile(const std::string& fullpath) {
 }
 
 
-
 std::vector<uint8_t> Parser::parse(const std::string& path) {
 
     fs::path canon = fs::weakly_canonical(fs::absolute(path));
-    
+
     if (!fs::exists(canon) || !fs::is_regular_file(canon)) {
         puts("error: file not found");
         exit(-1);
     }
 
     Parser parser;
-    parser.parseFile(canon);
+    parser.parseFile(canon.string());
 
-
+    // dbを一旦全部足す
+    // relposを一気に解決
+    // mainをcallしexitするコードを先端に追加 
 }

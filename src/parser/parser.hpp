@@ -22,6 +22,11 @@ enum Type {
 
 class Parser {
 public:
+    /**
+     * ソースをコンパイルする
+     * @param path ソースファイルの相対パス文字列
+     * @return 実行用バイナリ
+     */
     static std::vector<uint8_t> parse(const std::string& path);
 
 private:

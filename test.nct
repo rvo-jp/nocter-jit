@@ -3,7 +3,7 @@ import path/to/file.nct
 
 var num = 0
 
-func main {
+func main() {
     if 2 != 1 && 2 == 2 {
         puts "yes"
     }
