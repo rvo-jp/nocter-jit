@@ -1,22 +1,5 @@
-import std/io.nct
-import path/to/file.nct
 
-var num = 0
-
-func main() {
-    if 2 != 1 && 2 == 2 {
-        puts "yes"
-    }
-    else {
-        puts "no"
-    }
-    print("Hello, world!")
-}
-
-class ABC {
-    func method() {
-
-    }
-
-    private static var member = 1
+func main(i: Int) {
+    var num = 1
+    nputs i
 }

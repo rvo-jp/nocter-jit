@@ -5,20 +5,14 @@
 #include <unordered_set>
 #include <initializer_list>
 #include <cstring>
+#include <cstdint>
+#include <cstdlib>
 #include <type_traits>
 #include "excutable.hpp"
 
 #define ID(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') 
 #define NUM(c) (c >= '0' && c <= '9')
 #define EOI(c) (!ID(c) && !NUM(c))
-
-enum Type {
-    STRING,
-    INTEGER,
-    BOOL,
-    FLAOT,
-    FUNCTION
-};
 
 class Parser {
 public:
@@ -51,6 +45,12 @@ private:
         char *mem;
     };
 
+    // 型
+    struct Type {
+        std::string id; // class {id} にあたる識別子
+        std::vector<Type> tmpl;
+    };
+
     class Local {
     public:
         // 変数
@@ -62,8 +62,8 @@ private:
         // 変数リスト
         std::vector<Variable> vars;
 
-        // 変数が同時に生存する最大数
-        int maxVars;
+        int size; // ローカル変数サイズ
+        int max_size; // ローカル変数の最大サイズ
     };
 
     class Bytes {
@@ -81,24 +81,38 @@ private:
                 "Bytes::emit<T> requires integral or floating-point type"
             );
 
-            Bytes b;
-            b.bytes.resize(sizeof(T));
-            std::memcpy(b.bytes.data(), &value, sizeof(T));
-            return b;
+            Bytes bytes;
+            bytes.rawBytes.resize(sizeof(T));
+            std::memcpy(bytes.rawBytes.data(), &value, sizeof(T));
+            return bytes;
         }
 
         // vector用
-        static Bytes emit(const std::vector<uint8_t>& vec);
+        static Bytes emit(const std::vector<uint8_t>& rawBytes);
 
+        // 数値埋め込み
+        template <typename T>
+        Bytes& embed(size_t pos, T value) {
+            static_assert(
+                std::is_integral_v<T> || std::is_floating_point_v<T>,
+                "embed<T> requires integral or floating-point type"
+            );
+
+            std::memcpy(rawBytes.data() + pos, &value, sizeof(T));
+            return *this;
+        }
+
+        // 連結
         Bytes& append(const Bytes& other);
 
-        std::vector<uint8_t> bytes;
+        
+        std::vector<uint8_t> rawBytes;
 
         struct Relpos {
             int pos; // このbytes上での展開予定の位置
             const size_t index; // 特定のBytesのDB内でのindex
         };
-        std::vector<Relpos> rp;
+        std::vector<Relpos> relpos;
     };
 
     // 静的データ
@@ -115,6 +129,7 @@ private:
     struct Expr {
         enum option {
             IMM, // 即値（コンパイル時に確定してる定数）
+            ADDR, // (uintptr_t)
             COND, // 真偽値
             MODIFIABLE, // 変数
             /**
@@ -126,11 +141,13 @@ private:
             VAL
         } opt;
         Type type;
-
         std::variant<int64_t, double, Bytes> data;
 
         int64_t as_int() const {
             return std::get<int64_t>(data);
+        }
+        Bytes as_bytes() const {
+            return std::get<Bytes>(data);
         }
     };
 

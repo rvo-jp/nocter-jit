@@ -14,21 +14,18 @@ Parser::Expr Parser::expr1(Script& src, Local& local) {
         while (*str != *src.p);
         str ++; // 先頭の「"」を飛ばす 
 
-        std::vector<uint8_t> string(str, src.p);
-        string.push_back(0);
-
-        db.emplace_back("", STRING, Bytes::emit(string));
-
-        Bytes bytes = {0,0,0,0};
-        bytes.rp.emplace_back(0, db.size() - 1);
+        size_t len = src.p - str;
+        char* ptr = (char*)std::malloc(len + 1);
+        std::memcpy(ptr, str, len);
+        ptr[len] = '\0';
 
         src.p ++; // 終端の「"」を飛ばす 
         src.skip(0);
 
         return Expr{
             .opt = Expr::IMM,
-            .type = STRING,
-            .data = bytes
+            .type = Type{.id = "String"},
+            .data = reinterpret_cast<int64_t>(ptr)
         };
     }
     else if (ID(*src.p)) {
@@ -37,15 +34,15 @@ Parser::Expr Parser::expr1(Script& src, Local& local) {
 
         // printf("@var %zu\n", vars->size);
 
-        size_t i = local.vars.size() - 1;
-        do if (local.vars[i].id == id) {
-            return Expr{
-                .opt = Expr::MODIFIABLE,
-                .type = local.vars[i].type,
-                .data = Bytes::emit<int32_t>(-((i+1) * 8))
-            };
+        for (int64_t i = local.vars.size() - 1; i >= 0; i--) {
+            if (local.vars[i].id == id) {
+                return Expr{
+                    .opt = Expr::MODIFIABLE,
+                    .type = local.vars[i].type,
+                    .data = i * 8
+                };
+            }
         }
-        while (i--);
 
         csrc.error(1, "error: undefined variable '" + id + "'", -1);
     }
@@ -70,7 +67,7 @@ Parser::Expr Parser::expr1(Script& src, Local& local) {
 
             return Expr{
                 .opt = Expr::IMM,
-                .type = FLAOT,
+                .type = Type{.id = "Float"},
                 .data = d
             };
         }
@@ -80,7 +77,7 @@ Parser::Expr Parser::expr1(Script& src, Local& local) {
             src.skip(0);
             return Expr{
                 .opt = Expr::IMM,
-                .type = INTEGER,
+                .type = Type{.id = "Int"},
                 .data = n
             };
         }
@@ -91,7 +88,24 @@ Parser::Expr Parser::expr1(Script& src, Local& local) {
 }
 
 Parser::Bytes Parser::statement(Script& src, Local& local) {
+    if (src.p[0] == 'p' && src.p[1] == 'u' && src.p[2] == 't' && src.p[3] == 's' && EOI(src.p[4])) {
+        puts("@puts");
+        src.skip(4);
 
+        if (parse_expr(src, code, vars, 0, 0, 0).tp != STRING) {
+            puts("type-error: STRING");
+            exit(-1);
+        }
+
+        uint8_t byte[] = {
+            0x48,0x89,0xC1,                 // mov rcx, rax
+            0x48,0xB8,0,0,0,0,0,0,0,0,      // mov rax, imm64
+            0xFF,0xD0,                      // call rax
+        };
+        *(uint64_t*)(byte + 5) = (uint64_t)puts;
+
+        append(code, byte, sizeof(byte));
+    }
 }
 
 Parser::Bytes Parser::declare(Script& src, Local& local) {
@@ -103,15 +117,30 @@ Parser::Bytes Parser::declare(Script& src, Local& local) {
             src.error(1, "error: not id", -1);
         }
         auto id = src.getid();
+
+        if (*src.p != '=') {
+            src.error(1, "error: expected '='", -1);
+        }
         auto expr = expr1(src, local); // right hand value
 
+        Bytes bytes;
+        if (expr.opt == Expr::VAL) bytes.append(expr.as_bytes());
+
+        
         local.vars.emplace_back(id, expr.type);
-
+        local.size += 8;
         // 変数の最大数を更新
-        if (local.maxVars < local.vars.size()) local.maxVars = local.vars.size();
-
-        // mov [rbp - disp32], rax
-        return Bytes{0x48, 0x89, 0x85}.append(Bytes::emit<int32_t>(-(8 * local.vars.size())));
+        if (local.max_size < local.size) local.max_size = local.size;
+        
+        // mov [rsp + offset(i)], rax
+        int offset = 32 + (local.vars.size() - 1) * 8;
+        if (offset <= 127) {
+            bytes.append(Bytes{0x48, 0x8B, 0x44, 0x24, 0}.embed<int8_t>(4, offset));
+        }
+        else {
+            bytes.append(Bytes{0x48, 0x8B, 0x84, 0x24, 0,0,0,0}.embed<int32_t>(4, offset));
+        }
+        return bytes;
     }
     else return statement(src, local);
 }
@@ -154,27 +183,23 @@ void Parser::global(Script& src) {
         Bytes bytes;
         while (*src.p != '}') bytes.append(declare(src, local));
 
-        // 変数の最大数を表示
-        printf("@maxVars: %zu\n", local.maxVars);
+        // フレームサイズ align16(local + saved + 32 + 8)
+        int frame_size = (local.max_size + 32 + 8 + 15) & ~15;
 
-        // フレームサイズ
-        int frame_size = 32 + local.maxVars * 8;
-        frame_size = (frame_size + 15) & ~15;  // 16バイト境界に丸める
+        Bytes prologue; // sub rsp, frame_size
+        Bytes epilogue; // add rsp, frame_size
+        
+        if (frame_size <= 127) {
+            prologue = Bytes{0x48, 0x83, 0xEC, 0}.embed<int8_t>(3, frame_size);
+            epilogue = Bytes{0x48, 0x83, 0xC4, 0, 0xC3}.embed<int8_t>(3, frame_size);
+        }
+        else {
+            prologue = Bytes{0x48, 0x81, 0xEC, 0,0,0,0}.embed<int32_t>(3, frame_size);
+            epilogue = Bytes{0x48, 0x81, 0xC4, 0,0,0,0, 0xC3}.embed<int32_t>(3, frame_size);
+        }
 
-        db.emplace_back(id, FUNCTION, std::move(
-            Bytes{                  // prologue
-                0x55,               // push rbp
-                0x48, 0x89, 0xE5,   // mov rbp, rsp
-                0x48, 0x81, 0xEC    // sub rsp, imm32(frame_size後入れ)
-            }
-            .append(Bytes::emit(frame_size))
-            .append(bytes)
-            .append(Bytes{          // epilogue
-                0x48, 0x89, 0xEC,   // mov rsp, rbp
-                0x5D,               // pop rbp
-                0xC3                // ret
-            })
-        ));
+        // RSPを固定フレームポインタとして使う
+        db.emplace_back(id, Type{.id = "Function"}, prologue.append(bytes).append(epilogue));
     }
 
     else {
@@ -202,10 +227,25 @@ std::vector<uint8_t> Parser::parse(const std::string& path) {
         exit(-1);
     }
 
+    // パース処理
     Parser parser;
     parser.parseFile(canon.string());
 
-    // dbを一旦全部足す
+    
+    Bytes bytes{
+        0x48, 0x83, 0xEC, 0x28, // sub rsp, 40 (32 shadow + 8 align)
+        0xE8, 0,0,0,0,          // call main (rel32 関数のアドレス)
+        0x48, 0x83, 0xC4, 0x28, // add rsp, 40
+        0xC3                    // ret
+    };
+
+    // dbを全部足す
+    for (const auto& d : parser.db) {
+        bytes.append(d.bytes);
+    }
+
     // relposを一気に解決
-    // mainをcallしexitするコードを先端に追加 
+    for (const auto& rel : bytes.relpos) {
+        bytes.rawBytes;
+    }
 }
