@@ -1,5 +1,5 @@
 
-func main(i: Int) {
+func main() {
     var num = 1
-    nputs i
+    nputs num
 }

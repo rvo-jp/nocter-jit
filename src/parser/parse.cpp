@@ -91,7 +91,14 @@ Parser::Expr Parser::expr1(Script& src, Local& local) {
 Parser::Expr Parser::expr2(Script& src, Local& local) {
     auto expr = expr1(src, local);
 
-    return expr;    
+    return expr;
+}
+
+// call()
+Parser::Expr Parser::expr3(Script& src, Local& local) {
+    auto expr = expr2(src, local);
+
+    return expr;
 }
 
 Parser::Bytes Parser::statement(Script& src, Local& local) {
@@ -112,6 +119,12 @@ Parser::Bytes Parser::statement(Script& src, Local& local) {
             0xFF,0xD0,                      // call rax
         }.embed<uint64_t>(5, reinterpret_cast<uint64_t>(puts));
     }
+    else if (src.p[0] == 'f' && src.p[1] == 'o' && src.p[2] == 'r' && EOI(src.p[3])) {
+
+    }
+    else {
+        auto expr = expr2(src, local);
+    }
 }
 
 Parser::Bytes Parser::declare(Script& src, Local& local) {
@@ -130,7 +143,7 @@ Parser::Bytes Parser::declare(Script& src, Local& local) {
         auto expr = expr1(src, local); // right hand value
 
         Bytes bytes;
-        if (expr.opt == Expr::VAL) bytes.append(expr.get<Bytes>());
+        if (expr.opt == Expr::RAX) bytes.append(expr.get<Bytes>());
 
 
         local.vars.emplace_back(id, expr.type);

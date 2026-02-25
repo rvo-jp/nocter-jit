@@ -2,19 +2,18 @@ include io.nct
 include time.nct
 
 func main() {
-    printf("start\n");
-    
+    puts("start");
+
     var limit = 10;
-    
-    for (var i = 0; i < 10; i++) {
+    for var i = 0; i < 10; i++ {
         var begin = clock();
         var l = 0.0;
-        for (var n = 1; n < limit; n += 4) {
+        for var n = 1; n < limit; n += 4 {
             l += (1.0 / n) - (1.0 / (n + 2));
         }
         printf("%1.16f", l * 4);
         printf(" %f sec.\n", (clock() - begin) / CLOCKS_PER_SEC);
         limit *= 10;
     }
-    printf("end\n");
+    puts("end");
 }

@@ -129,18 +129,18 @@ private:
     struct Expr {
         enum option {
             IMM, // 即値（コンパイル時に確定してる定数）
-            ADDR, // (uintptr_t)
+            ADDR, // (uintptr_t) メモリロードが必要な値
             COND, // 真偽値
-            MODIFIABLE, // 変数
+            VAR, // 変数
             /**
-             * その他の値
+             * rax
              * - 式の評価結果
              * - 関数呼び出し結果
-             * - メモリロードが必要な値
              */
-            VAL
+            RAX
         } opt;
         Type type;
+        
         std::variant<int64_t, double, Bytes> data;
 
         template <typename T>
@@ -155,18 +155,23 @@ private:
     // + -
     Expr expr2(Script& src, Local& local);
 
+    // call()
+    Expr expr3(Script& src, Local& local);
+
     // if
     Bytes statement(Script& src, Local& local);
 
     // let
     Bytes declare(Script& src, Local& local);
 
+    // func class (廃止予定。preGlobalでdbにsrcを保存する予定なので、そのsrcをパースするだけ)
+    void global(Script& src);
 
     /**
      * include func class
      * 静的データリストに保存
      */
-    void global(Script& src);
+    void preGlobal(Script& src);
 
     /**
      * ソースファイルをパースする
