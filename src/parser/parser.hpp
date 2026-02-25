@@ -143,16 +143,17 @@ private:
         Type type;
         std::variant<int64_t, double, Bytes> data;
 
-        int64_t as_int() const {
-            return std::get<int64_t>(data);
-        }
-        Bytes as_bytes() const {
-            return std::get<Bytes>(data);
+        template <typename T>
+        T get() const {
+            return std::get<T>(data)
         }
     };
 
     // ()
     Expr expr1(Script& src, Local& local);
+
+    // + -
+    Expr expr2(Script& src, Local& local);
 
     // if
     Bytes statement(Script& src, Local& local);

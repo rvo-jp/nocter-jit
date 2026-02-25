@@ -87,24 +87,30 @@ Parser::Expr Parser::expr1(Script& src, Local& local) {
     }
 }
 
-Parser::Bytes Parser::statement(Script& src, Local& local) {
-    if (src.p[0] == 'p' && src.p[1] == 'u' && src.p[2] == 't' && src.p[3] == 's' && EOI(src.p[4])) {
-        puts("@puts");
-        src.skip(4);
+// + -
+Parser::Expr Parser::expr2(Script& src, Local& local) {
+    auto expr = expr1(src, local);
 
-        if (parse_expr(src, code, vars, 0, 0, 0).tp != STRING) {
-            puts("type-error: STRING");
-            exit(-1);
+    return expr;    
+}
+
+Parser::Bytes Parser::statement(Script& src, Local& local) {
+    if (src.p[0] == 'n' && src.p[1] == 'p' && src.p[2] == 'u' && src.p[3] == 't' && src.p[4] == 's' && EOI(src.p[5])) {
+        puts("@nputs");
+        src.skip(5);
+
+        Script csrc = src;
+        auto expr = expr2(src, local);
+
+        if (expr.type.id != "String") {
+            csrc.error(1, "type-error: expected 'String'", -1);
         }
 
-        uint8_t byte[] = {
+        Bytes{
             0x48,0x89,0xC1,                 // mov rcx, rax
             0x48,0xB8,0,0,0,0,0,0,0,0,      // mov rax, imm64
             0xFF,0xD0,                      // call rax
-        };
-        *(uint64_t*)(byte + 5) = (uint64_t)puts;
-
-        append(code, byte, sizeof(byte));
+        }.embed<uint64_t>(5, reinterpret_cast<uint64_t>(puts));
     }
 }
 
@@ -124,9 +130,9 @@ Parser::Bytes Parser::declare(Script& src, Local& local) {
         auto expr = expr1(src, local); // right hand value
 
         Bytes bytes;
-        if (expr.opt == Expr::VAL) bytes.append(expr.as_bytes());
+        if (expr.opt == Expr::VAL) bytes.append(expr.get<Bytes>());
 
-        
+
         local.vars.emplace_back(id, expr.type);
         local.size += 8;
         // 変数の最大数を更新
