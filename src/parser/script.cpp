@@ -1,23 +1,21 @@
 #include "parser.hpp"
 #include <iostream>
-#include <fstream>
-#include <stdexcept>
 
 Parser::Script::Script(char* ptr, std::string fullpath_)
-    : p(ptr), fullpath(std::move(fullpath_)) {}
+    : p(ptr), start(ptr), fullpath(std::move(fullpath_)) {}
 
 void Parser::Script::error(int len, const std::string& msg, int exc) {
     
-    int line = 0;
-    for (char *s = p; s != mem; s --) {
+    size_t line = 0;
+    for (char *s = p; s != start; s --) {
         if (*s == '\n') line ++;
     }
-    std::cout << fullpath << ", line " << line << ":\n";
+    std::cout << fullpath << ", line " << line << std::endl;
 
-    int col = 0;
+    size_t col = 0;
 
-    // 行の先頭に移動
-    while (p != mem && p[-1] != '\n') {
+    // colをインクリメントしながら行の先頭に移動
+    while (p != start && p[-1] != '\n') {
         p --;
         col ++;
     }
@@ -27,19 +25,12 @@ void Parser::Script::error(int len, const std::string& msg, int exc) {
         col --;
     }
 
-    while (*p != '\r' && *p != '\n' && *p != '\0') putc(*p, stdout);
-    putc('\n', stdout);
-
-    while (col > 0) {
-        col --;
-        putc(' ', stdout);
-    }
-    while (len > 0) {
-        len --;
-        putc('^', stdout);
-    }
-
-    std::cout << "\n" << msg << "\n";
+    const char* str = p;
+    while (*p != '\r' && *p != '\n' && *p != '\0') p++;
+    std::cout.write(str, p - str);
+    std::cout << std::endl << std::string(col, ' ');
+    std::cout << std::string(len, '^');
+    std::cout << std::endl << msg << std::endl;
 
     if (exc != 0) exit(exc);
 }

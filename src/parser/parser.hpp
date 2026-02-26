@@ -38,6 +38,8 @@ private:
         void skip(int len);
         // 識別子取得（+移動）
         std::string getid();
+    private:
+        char *start;
     };
 
     // 型
@@ -50,7 +52,7 @@ private:
     public:
         // 変数
         struct Variable {
-            const std::string id;
+            std::string id;
             Type type;
         };
 
@@ -91,7 +93,7 @@ private:
 
         struct Relpos {
             int pos; // このbytes上での展開予定の位置
-            const size_t index; // 特定のBytesのDB内でのindex
+            size_t index; // 特定のBytesのDB内でのindex
         };
         std::vector<Relpos> relpos;
     };
@@ -100,7 +102,7 @@ private:
     struct DB {
         std::string id;
         Type type;
-        const Script src; // 関数のパラメータの位置から
+        Script src; // 関数のパラメータの位置から
     };
     // 静的データリスト
     std::vector<DB> db;
@@ -110,11 +112,14 @@ private:
     struct Expr {
         enum option {
             IMM, // 即値（コンパイル時に確定してる定数）
-            ADDR, // (uintptr_t) メモリロードが必要な値
             COND, // 真偽値
-            VAR, // 変数
+
+            ADDR, // メモリロードが必要な値 (uintptr_t) 
+            RSP, // ローカル変数 (rel32)
+            RIP, // グローバル rel32
+
             /**
-             * rax
+             * 結果がraxに入る式 (Bytes型)
              * - 式の評価結果
              * - 関数呼び出し結果
              */
@@ -138,6 +143,9 @@ private:
 
     // call()
     Expr expr3(Script& src, Local& local);
+
+    // expr ?:
+    Expr express(Script& src, Local& local);
 
     // if
     Bytes statement(Script& src, Local& local);

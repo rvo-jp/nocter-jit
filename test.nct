@@ -4,7 +4,7 @@ func main() {
     nputs num
 }
 
-func test(i: Int): Int {
+func test(): Int {
     var n = i
     return n
 }

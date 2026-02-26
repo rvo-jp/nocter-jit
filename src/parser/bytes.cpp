@@ -1,6 +1,7 @@
 #include "parser.hpp"
 
-Parser::Bytes::Bytes(std::initializer_list<uint8_t> init) : rawBytes(init) {}
+Parser::Bytes::Bytes(std::initializer_list<uint8_t> init)
+    : rawBytes(init) {}
 
 Parser::Bytes Parser::Bytes::emit(const std::vector<uint8_t>& rawBytes) {
     Bytes bytes;

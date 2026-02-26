@@ -2,6 +2,12 @@
 #include <filesystem>
 #include <fstream>
 
+// コンパイル済みコードのパース
+// callの引数付き呼び出し
+// デバック
+// 演算
+// for構文
+
 // ()
 Parser::Expr Parser::expr1(Script& src, Local& local) {
     if (*src.p == '"' || *src.p == '\'') {
@@ -35,12 +41,22 @@ Parser::Expr Parser::expr1(Script& src, Local& local) {
 
         // printf("@var %zu\n", vars->size);
 
-        for (int64_t i = local.vars.size() - 1; i >= 0; i--) {
+        for (int i = local.vars.size() - 1; i >= 0; i--) {
             if (local.vars[i].id == id) {
                 return Expr{
-                    .opt = Expr::VAR,
+                    .opt = Expr::RSP,
                     .type = local.vars[i].type,
-                    .data = i * 8
+                    .data = 32 + i * 8
+                };
+            }
+        }
+
+        for (int i = db.size() - 1; i >= 0; i --) {
+            if (db[i].id == id) {
+                return Expr{
+                    .opt = Expr::RIP,
+                    .type = db[i].type,
+                    .data = i
                 };
             }
         }
@@ -102,6 +118,11 @@ Parser::Expr Parser::expr3(Script& src, Local& local) {
     return expr;
 }
 
+Parser::Expr Parser::express(Script& src, Local& local) {
+    auto expr = expr3(src, local);
+    return expr;
+}
+
 Parser::Bytes Parser::statement(Script& src, Local& local) {
     if (src.p[0] == 'n' && src.p[1] == 'p' && src.p[2] == 'u' && src.p[3] == 't' && src.p[4] == 's' && EOI(src.p[5])) {
         puts("@nputs");
@@ -124,12 +145,12 @@ Parser::Bytes Parser::statement(Script& src, Local& local) {
 
     }
     else {
-        auto expr = expr2(src, local);
+        auto expr = express(src, local);
     }
 }
 
 Parser::Bytes Parser::declare(Script& src, Local& local) {
-    if (src.p[0] == 'l' && src.p[1] == 'e' && src.p[2] == 't' && EOI(src.p[3])) {
+    if (src.p[0] == 'v' && src.p[1] == 'a' && src.p[2] == 'r' && EOI(src.p[3])) {
         src.skip(3);
 
         // id
@@ -141,7 +162,7 @@ Parser::Bytes Parser::declare(Script& src, Local& local) {
         if (*src.p != '=') {
             src.error(1, "error: expected '='", -1);
         }
-        auto expr = expr1(src, local); // right hand value
+        auto expr = express(src, local); // right hand value
 
         Bytes bytes;
         if (expr.opt == Expr::RAX) bytes.append(expr.get<Bytes>());
@@ -173,7 +194,7 @@ namespace fs = std::filesystem;
 void Parser::global(Script& src) {
     // include
     if (src.p[0] == 'i' && src.p[1] == 'n' && src.p[2] == 'c' && src.p[3] == 'l' && src.p[4] == 'u' && src.p[5] == 'd' && src.p[6] == 'e' && EOI(src.p[7])) {
-        src.skip(6);
+        src.skip(7);
 
         Script csrc = src;
         while (*src.p != ' ' || *src.p != '\r' || *src.p != '\n' || *src.p != '\0') *src.p ++;
@@ -205,7 +226,7 @@ void Parser::global(Script& src) {
         while (block > 0);
         src.skip(0);
 
-        db.emplace_back(id, Type{.id = "Function"}, code);
+        db.emplace_back(id, Type{.id = "Function"}, code, 0);
     }
 
     else {
@@ -257,13 +278,17 @@ std::vector<uint8_t> Parser::parse(const std::string& path) {
     Parser parser;
     parser.include(canon.string());
 
+    Bytes bytes;
+
+    auto it = std::find_if(parser.db.begin(), parser.db.end(),
+    [](const DB& e) { return e.id == "main"; });
+
+    if (it == parser.db.end()) {
+        throw std::runtime_error("main() not found");
+    }
     
-    Bytes bytes{
-        0x48, 0x83, 0xEC, 0x28, // sub rsp, 40 (32 shadow + 8 align)
-        0xE8, 0,0,0,0,          // call main (rel32 関数のアドレス)
-        0x48, 0x83, 0xC4, 0x28, // add rsp, 40
-        0xC3                    // ret
-    };
+    // 先頭へ移動
+    std::rotate(parser.db.begin(), it, it + 1);
 
     // dbをパース
     for (const auto& d : parser.db) {
