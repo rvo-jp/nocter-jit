@@ -1,5 +1,6 @@
 #include "parser.hpp"
 #include <filesystem>
+#include <fstream>
 
 // ()
 Parser::Expr Parser::expr1(Script& src, Local& local) {
@@ -37,7 +38,7 @@ Parser::Expr Parser::expr1(Script& src, Local& local) {
         for (int64_t i = local.vars.size() - 1; i >= 0; i--) {
             if (local.vars[i].id == id) {
                 return Expr{
-                    .opt = Expr::MODIFIABLE,
+                    .opt = Expr::VAR,
                     .type = local.vars[i].type,
                     .data = i * 8
                 };
@@ -184,7 +185,7 @@ void Parser::global(Script& src) {
             csrc.error(src.p - csrc.p, "error: file not found", -1);
         }
 
-        return parseFile(canon.string());
+        include(canon.string());
     }
 
     // func
@@ -192,15 +193,86 @@ void Parser::global(Script& src) {
         src.skip(4);
 
         std::string id = src.getid();
+        Script code = src;
 
-        if (*src.p != '{') {
-            src.error(1, "error: expected '{'", -1);
+        if (*src.p != '{') src.error(1, "error: expected '{'", -1);
+        int block = 0;
+        do { // もっと正確に
+            if (*src.p == '{') block ++;
+            if (*src.p == '}') block --;
+            src.p++;
         }
-        src.p++;
+        while (block > 0);
+        src.skip(0);
 
+        db.emplace_back(id, Type{.id = "Function"}, code);
+    }
+
+    else {
+        src.error(1, "error: ", -1);
+    }
+}
+
+void Parser::include(const std::string& fullpath) {
+    auto [it, inserted] = included_files.try_emplace(fullpath, nullptr);
+
+    if (!inserted) return;//すでに存在
+
+    std::ifstream ifs(fullpath, std::ios::binary);
+    if (!ifs) {
+        included_files.erase(it);
+        throw std::runtime_error("file open failed: " + fullpath);
+    }
+
+    ifs.seekg(0, std::ios::end);
+    size_t size = static_cast<size_t>(ifs.tellg());
+    ifs.seekg(0, std::ios::beg);
+
+    auto content = std::make_unique<std::string>();
+    content->resize(size + 1);
+
+    if (!ifs.read(content->data(), size)) {
+        included_files.erase(it);
+        throw std::runtime_error("file read failed: " + fullpath);
+    }
+
+    (*content)[size] = '\0';
+    it->second = std::move(content);
+
+    Script src(it->second->data(), fullpath);
+    while (*src.p != '\0') global(src);
+}
+
+
+std::vector<uint8_t> Parser::parse(const std::string& path) {
+
+    fs::path canon = fs::weakly_canonical(fs::absolute(path));
+
+    if (!fs::exists(canon) || !fs::is_regular_file(canon)) {
+        puts("error: file not found");
+        exit(-1);
+    }
+
+    // パース処理
+    Parser parser;
+    parser.include(canon.string());
+
+    
+    Bytes bytes{
+        0x48, 0x83, 0xEC, 0x28, // sub rsp, 40 (32 shadow + 8 align)
+        0xE8, 0,0,0,0,          // call main (rel32 関数のアドレス)
+        0x48, 0x83, 0xC4, 0x28, // add rsp, 40
+        0xC3                    // ret
+    };
+
+    // dbをパース
+    for (const auto& d : parser.db) {
         Local local;
         Bytes bytes;
-        while (*src.p != '}') bytes.append(declare(src, local));
+        Script src = d.src; // コピーを作成
+
+        if (*src.p == '{') src.skip(1);
+        while (*src.p != '}') bytes.append(parser.declare(src, local));
 
         // フレームサイズ align16(local + saved + 32 + 8)
         int frame_size = (local.max_size + 32 + 8 + 15) & ~15;
@@ -217,50 +289,7 @@ void Parser::global(Script& src) {
             epilogue = Bytes{0x48, 0x81, 0xC4, 0,0,0,0, 0xC3}.embed<int32_t>(3, frame_size);
         }
 
-        // RSPを固定フレームポインタとして使う
-        db.emplace_back(id, Type{.id = "Function"}, prologue.append(bytes).append(epilogue));
-    }
-
-    else {
-        src.error(1, "error: ", -1);
-    }
-}
-
-void Parser::parseFile(const std::string& fullpath) {
-    if (!included_files.insert(fullpath).second) {
-        // すでにinclude済み
-        return;
-    }
-
-    Script src(fullpath);
-    while (*src.p != '\0') global(src);
-}
-
-
-std::vector<uint8_t> Parser::parse(const std::string& path) {
-
-    fs::path canon = fs::weakly_canonical(fs::absolute(path));
-
-    if (!fs::exists(canon) || !fs::is_regular_file(canon)) {
-        puts("error: file not found");
-        exit(-1);
-    }
-
-    // パース処理
-    Parser parser;
-    parser.parseFile(canon.string());
-
-    
-    Bytes bytes{
-        0x48, 0x83, 0xEC, 0x28, // sub rsp, 40 (32 shadow + 8 align)
-        0xE8, 0,0,0,0,          // call main (rel32 関数のアドレス)
-        0x48, 0x83, 0xC4, 0x28, // add rsp, 40
-        0xC3                    // ret
-    };
-
-    // dbを全部足す
-    for (const auto& d : parser.db) {
-        bytes.append(d.bytes);
+        bytes.append(prologue.append(bytes).append(epilogue));
     }
 
     // relposを一気に解決

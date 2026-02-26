@@ -2,7 +2,7 @@
 #include <vector>
 #include <variant>
 #include <string>
-#include <unordered_set>
+#include <unordered_map>
 #include <initializer_list>
 #include <cstring>
 #include <cstdint>
@@ -28,21 +28,16 @@ private:
 
     class Script {
     public:
-        Script(const std::string& fullpath_);
         char *p;
-        const std::string fullpath;
+        const std::string fullpath; // コピーする（実態あり）
 
+        Script(char* ptr, std::string fullpath_);
         // エラー吐く
         void error(int len, const std::string& msg, int exc);
-
         // 空白スキップ
         void skip(int len);
-
         // 識別子取得（+移動）
         std::string getid();
-    private:
-        // ファイルの中身の実態（アロケート）
-        char *mem;
     };
 
     // 型
@@ -72,20 +67,6 @@ private:
 
         // 生バイト列用
         Bytes(std::initializer_list<uint8_t> init);
-
-        // 数値エンコード用
-        template <typename T>
-        static Bytes emit(T value) {
-            static_assert(
-                std::is_integral_v<T> || std::is_floating_point_v<T>,
-                "Bytes::emit<T> requires integral or floating-point type"
-            );
-
-            Bytes bytes;
-            bytes.rawBytes.resize(sizeof(T));
-            std::memcpy(bytes.rawBytes.data(), &value, sizeof(T));
-            return bytes;
-        }
 
         // vector用
         static Bytes emit(const std::vector<uint8_t>& rawBytes);
@@ -119,7 +100,7 @@ private:
     struct DB {
         std::string id;
         Type type;
-        Bytes bytes;
+        const Script src; // 関数のパラメータの位置から
     };
     // 静的データリスト
     std::vector<DB> db;
@@ -164,23 +145,22 @@ private:
     // let
     Bytes declare(Script& src, Local& local);
 
-    // func class (廃止予定。preGlobalでdbにsrcを保存する予定なので、そのsrcをパースするだけ)
-    void global(Script& src);
-
     /**
      * include func class
      * 静的データリストに保存
+     * 
+     * dbにsrcを保存する予定なので、そのsrcをパースするだけ
      */
-    void preGlobal(Script& src);
+    void global(Script& src);
 
     /**
      * ソースファイルをパースする
      * @param fullpath フルパス文字列
      * @return バイト列 / インクルード済みの場合空バイト列を返す
      */
-    void parseFile(const std::string& fullpath);
+    void include(const std::string& fullpath);
 
-    // インクルード済みのファイルのフルパス文字列リスト（2重インクルード防止）
-    std::unordered_set<std::string> included_files;
+    // インクルード済みのファイルのフルパスとファイル内容の実態リスト（2重インクルード防止）
+    std::unordered_map<std::string, std::unique_ptr<std::string>> included_files;
 };
 

@@ -1,28 +1,10 @@
 #include "parser.hpp"
-#include <stdio.h>
-#include <stdlib.h>
 #include <iostream>
+#include <fstream>
+#include <stdexcept>
 
-Parser::Script::Script(const std::string& fullpath_) : fullpath(fullpath_) {
-    FILE* fp = fopen(fullpath.c_str(), "rb");
-    if (!fp) {
-        puts("error: file not found");
-        exit(-1);
-    }
-
-    fseek(fp, 0, SEEK_END);
-    size_t flen = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-
-    mem = p = (char *)malloc(flen + 1);
-    fread(p, 1, flen, fp);
-    p[flen] = '\0';
-    fclose(fp);
-}
-
-Parser::Script::~Script() {
-    free(mem);
-}
+Parser::Script::Script(char* ptr, std::string fullpath_)
+    : p(ptr), fullpath(std::move(fullpath_)) {}
 
 void Parser::Script::error(int len, const std::string& msg, int exc) {
     
