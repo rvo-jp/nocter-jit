@@ -3,8 +3,3 @@ func main() {
     var num = 1
     nputs num
 }
-
-func test(): Int {
-    var n = i
-    return n
-}

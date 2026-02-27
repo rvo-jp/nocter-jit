@@ -2,8 +2,9 @@
 #include <filesystem>
 #include <fstream>
 
+// callの引数付き呼び出し statementで対応
+// puts
 // コンパイル済みコードのパース
-// callの引数付き呼び出し
 // デバック
 // 演算
 // for構文
@@ -32,7 +33,7 @@ Parser::Expr Parser::expr1(Script& src, Local& local) {
         return Expr{
             .opt = Expr::IMM,
             .type = Type{.id = "String"},
-            .data = reinterpret_cast<int64_t>(ptr)
+            .data = reinterpret_cast<uintptr_t>(ptr)
         };
     }
     else if (ID(*src.p)) {
@@ -64,7 +65,7 @@ Parser::Expr Parser::expr1(Script& src, Local& local) {
         csrc.error(1, "error: undefined variable '" + id + "'", -1);
     }
     else if (NUM(*src.p)) {
-        int64_t n = 0;
+        int n = 0;
         do n = n * 10 + (*src.p ++) - '0';
         while (NUM(*src.p));
 
@@ -115,6 +116,40 @@ Parser::Expr Parser::expr2(Script& src, Local& local) {
 Parser::Expr Parser::expr3(Script& src, Local& local) {
     auto expr = expr2(src, local);
 
+    if (*src.p == '(') {
+        puts("@call");
+
+        if (expr.type.id != "Function") {
+            src.error(1, "type-error: expected 'String'", -1);
+        }
+        Bytes bytes;
+
+        const std::vector<Type>& params = expr.type.tmpl;
+        int i = 0;
+        do {
+            src.skip(1);
+            Script csrc = src;
+
+            if (i >= params.size()) csrc.error(1, "error: params", -1);
+            auto arg = express(src, local);
+
+            if (arg.type == params[i]) { // 型一致
+                if (arg.opt == Expr::RSP) {
+                    int offset = arg.get<int>();
+
+                    bytes.append(offset <= 127 ?
+                        Bytes{0x48, 0x8B, 0x4C, 0x24, 0}.embed<int8_t>(4, offset) :
+                        Bytes{0x48, 0x8B, 0x8C, 0x24, 0,0,0,0}.embed<int32_t>(4, offset)
+                    );
+                }
+            }
+            else csrc.error(1, "type-error", -1);
+            
+            i++;
+        }
+        while (*src.p == ',');
+
+    }
     return expr;
 }
 
@@ -154,32 +189,38 @@ Parser::Bytes Parser::declare(Script& src, Local& local) {
         src.skip(3);
 
         // id
-        if (!ID(*src.p)) {
-            src.error(1, "error: not id", -1);
-        }
+        if (!ID(*src.p)) src.error(1, "error: not id", -1);
         auto id = src.getid();
 
-        if (*src.p != '=') {
-            src.error(1, "error: expected '='", -1);
-        }
+        if (*src.p != '=') src.error(1, "error: expected '='", -1);
+        src.skip(1);
         auto expr = express(src, local); // right hand value
-
-        Bytes bytes;
-        if (expr.opt == Expr::RAX) bytes.append(expr.get<Bytes>());
 
 
         local.vars.emplace_back(id, expr.type);
-        local.size += 8;
         // 変数の最大数を更新
-        if (local.max_size < local.size) local.max_size = local.size;
-        
-        // mov [rsp + offset(i)], rax
+        if (local.max_size < local.vars.size()) local.max_size = local.vars.size();
+
+        Bytes bytes;
         int offset = 32 + (local.vars.size() - 1) * 8;
-        if (offset <= 127) {
-            bytes.append(Bytes{0x48, 0x8B, 0x44, 0x24, 0}.embed<int8_t>(4, offset));
+
+        if (expr.opt == Expr::RAX) {
+            // mov [rsp + offset(i)], rax
+            bytes.append(expr.get<Bytes>());
+            bytes.append(offset <= 127 ?
+                Bytes{0x48, 0x8B, 0x44, 0x24, 0}.embed<int8_t>(4, offset) : 
+                Bytes{0x48, 0x8B, 0x84, 0x24, 0,0,0,0}.embed<int32_t>(4, offset)
+            );
+        }
+        else if (expr.opt == Expr::IMM) {
+            // mov qword ptr [rsp + offset(i)], 123
+            bytes.append(offset <= 127 ?
+                Bytes{0x48, 0xC7, 0x44, 0x24, 0, 0,0,0,0}.embed<int8_t>(4, offset).embed<int32_t>(5, expr.get<int>()) :
+                Bytes{0x48, 0xC7, 0x84, 0x24, 0,0,0,0, 0,0,0,0}.embed<int32_t>(4, offset).embed<int32_t>(8, expr.get<int>())
+            );
         }
         else {
-            bytes.append(Bytes{0x48, 0x8B, 0x84, 0x24, 0,0,0,0}.embed<int32_t>(4, offset));
+            throw std::runtime_error("@dev var");
         }
         return bytes;
     }
@@ -278,7 +319,7 @@ std::vector<uint8_t> Parser::parse(const std::string& path) {
     Parser parser;
     parser.include(canon.string());
 
-    Bytes bytes;
+    Bytes mainBytes;
 
     auto it = std::find_if(parser.db.begin(), parser.db.end(),
     [](const DB& e) { return e.id == "main"; });
@@ -300,7 +341,7 @@ std::vector<uint8_t> Parser::parse(const std::string& path) {
         while (*src.p != '}') bytes.append(parser.declare(src, local));
 
         // フレームサイズ align16(local + saved + 32 + 8)
-        int frame_size = (local.max_size + 32 + 8 + 15) & ~15;
+        int frame_size = (local.max_size*8 + 32 + 8 + 15) & ~15;
 
         Bytes prologue; // sub rsp, frame_size
         Bytes epilogue; // add rsp, frame_size
@@ -314,11 +355,11 @@ std::vector<uint8_t> Parser::parse(const std::string& path) {
             epilogue = Bytes{0x48, 0x81, 0xC4, 0,0,0,0, 0xC3}.embed<int32_t>(3, frame_size);
         }
 
-        bytes.append(prologue.append(bytes).append(epilogue));
+        mainBytes.append(prologue.append(bytes).append(epilogue));
     }
 
     // relposを一気に解決
-    for (const auto& rel : bytes.relpos) {
-        bytes.rawBytes;
+    for (const auto& rel : mainBytes.relpos) {
+        mainBytes.rawBytes;
     }
 }

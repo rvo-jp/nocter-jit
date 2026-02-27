@@ -46,6 +46,10 @@ private:
     struct Type {
         std::string id; // class {id} にあたる識別子
         std::vector<Type> tmpl;
+
+        bool operator==(const Type& other) const {
+            return id == other.id && tmpl == other.tmpl;
+        }
     };
 
     class Local {
@@ -59,7 +63,6 @@ private:
         // 変数リスト
         std::vector<Variable> vars;
 
-        int size; // ローカル変数サイズ
         int max_size; // ローカル変数の最大サイズ
     };
 
@@ -127,7 +130,7 @@ private:
         } opt;
         Type type;
         
-        std::variant<int64_t, double, Bytes> data;
+        std::variant<uintptr_t, int, double, Bytes> data;
 
         template <typename T>
         T get() const {
