@@ -1,5 +1,5 @@
 
 func main() {
-    var num = 1
-    nputs num
+    var str = "Hello, world!"
+    puts(str)
 }

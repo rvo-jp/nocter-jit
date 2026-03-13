@@ -2,16 +2,21 @@
 #include <filesystem>
 #include <fstream>
 
-// callの引数付き呼び出し statementで対応
-// puts
-// コンパイル済みコードのパース
-// デバック
+// callの引数付き呼び出し
+// puts　コンパイル済みコードのパース
+// helloworld テストデバック
 // 演算
 // for構文
+// デバック
+
 
 // ()
 Parser::Expr Parser::expr1(Script& src, Local& local) {
-    if (*src.p == '"' || *src.p == '\'') {
+    if (src.p[0] == 'n' && src.p[1] == 'p' && src.p[2] == 'u' && src.p[3] == 't' && src.p[4] == 's' && EOI(src.p[5])) {
+        // プロトタイプ試験専用 例外措置
+
+    }
+    else if (*src.p == '"' || *src.p == '\'') {
         char* str = src.p;
         do {
             if (*src.p == '\'') src.p ++;
@@ -118,37 +123,46 @@ Parser::Expr Parser::expr3(Script& src, Local& local) {
 
     if (*src.p == '(') {
         puts("@call");
+        if (expr.type.id != "Function") src.error(1, "type-error: expected 'Function'", -1);
 
-        if (expr.type.id != "Function") {
-            src.error(1, "type-error: expected 'String'", -1);
-        }
         Bytes bytes;
-
         const std::vector<Type>& params = expr.type.tmpl;
         int i = 0;
-        do {
-            src.skip(1);
+
+        src.skip(1);
+        if (*src.p != ')') for (;;) {
             Script csrc = src;
 
+            // 引数多すぎ
             if (i >= params.size()) csrc.error(1, "error: params", -1);
             auto arg = express(src, local);
 
-            if (arg.type == params[i]) { // 型一致
-                if (arg.opt == Expr::RSP) {
-                    int offset = arg.get<int>();
+            // 型チェック
+            if (arg.type != params[i]) csrc.error(1, "type-error", -1);
 
+            if (arg.opt == Expr::RSP) {
+                int offset = arg.get<int>();
+
+                if (i == 0) {
                     bytes.append(offset <= 127 ?
                         Bytes{0x48, 0x8B, 0x4C, 0x24, 0}.embed<int8_t>(4, offset) :
                         Bytes{0x48, 0x8B, 0x8C, 0x24, 0,0,0,0}.embed<int32_t>(4, offset)
                     );
                 }
+                else csrc.error(1, "@dev param > 0", -1);
             }
-            else csrc.error(1, "type-error", -1);
+            else csrc.error(1, "@dev param != rsp", -1);
             
             i++;
+            if (*src.p == ')') break;
+            if (*src.p != ',') src.error(1, "error: invalid token", -1);
+            src.skip(1);
         }
-        while (*src.p == ',');
 
+        // 引数足りない
+        if (i != params.size()) src.error(1, "error: params", -1);
+
+        
     }
     return expr;
 }
@@ -219,9 +233,8 @@ Parser::Bytes Parser::declare(Script& src, Local& local) {
                 Bytes{0x48, 0xC7, 0x84, 0x24, 0,0,0,0, 0,0,0,0}.embed<int32_t>(4, offset).embed<int32_t>(8, expr.get<int>())
             );
         }
-        else {
-            throw std::runtime_error("@dev var");
-        }
+        else src.error(1, "@dev var", -1);
+
         return bytes;
     }
     else return statement(src, local);
@@ -255,7 +268,7 @@ void Parser::global(Script& src) {
         src.skip(4);
 
         std::string id = src.getid();
-        Script code = src;
+        Script fsrc = src;
 
         if (*src.p != '{') src.error(1, "error: expected '{'", -1);
         int block = 0;
@@ -267,7 +280,7 @@ void Parser::global(Script& src) {
         while (block > 0);
         src.skip(0);
 
-        db.emplace_back(id, Type{.id = "Function"}, code, 0);
+        db.emplace_back(id, Type{.id = "Function"}, fsrc);
     }
 
     else {

@@ -50,6 +50,9 @@ private:
         bool operator==(const Type& other) const {
             return id == other.id && tmpl == other.tmpl;
         }
+        bool operator!=(const Type& other) const {
+            return !(*this == other);
+        }
     };
 
     class Local {
@@ -129,6 +132,8 @@ private:
             RAX
         } opt;
         Type type;
+
+        bool pointer;
         
         std::variant<uintptr_t, int, double, Bytes> data;
 
